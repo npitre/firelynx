@@ -1,0 +1,23 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ProxySSL build artifact (built by install.sh)
+proxyssl/*.so
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Local agent/tooling state
+.claude/

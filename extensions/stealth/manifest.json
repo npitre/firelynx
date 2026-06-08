@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Firelynx Stealth",
+  "version": "1.1",
+  "description": "Hides WebDriver automation markers for normal browsing experience",
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "stealth@firelynx.local",
+      "strict_min_version": "128.0"
+    }
+  }
+}

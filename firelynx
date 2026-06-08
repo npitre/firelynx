@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Firelynx - Accessible Web Browser
+# Firefox backend with lynx frontend for modern web accessibility
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Check for src/main.py in the same directory first (for running from package directory)
+if [[ -f "$SCRIPT_DIR/src/main.py" ]]; then
+    FIRELYNX_PATH="$SCRIPT_DIR"
+    echo "Running from package directory: $SCRIPT_DIR"
+else
+    # Fall back to installed location
+    FIRELYNX_PATH="$HOME/.local/share/firelynx"
+
+    if [[ -d "$FIRELYNX_PATH" ]] && [[ -f "$FIRELYNX_PATH/src/main.py" ]]; then
+        echo "Using installed location: $FIRELYNX_PATH"
+    else
+        echo "Error: Firelynx is not installed properly."
+        echo "Please ensure either:"
+        echo "  - src/main.py exists in current directory, or"
+        echo "  - Firelynx is properly installed with './install.sh'"
+        exit 1
+    fi
+fi
+
+# Ensure selenium-manager geckodriver is available
+if command -v selenium-manager >/dev/null 2>&1; then
+    # Initialize selenium-manager geckodriver cache if needed
+    if [[ ! -f "$HOME/.cache/selenium/geckodriver/linux64/0.36.0/geckodriver" ]]; then
+        echo "Initializing geckodriver with selenium-manager..."
+        selenium-manager --browser firefox --output JSON >/dev/null 2>&1
+    fi
+else
+    echo "Warning: selenium-manager not found. Please install python3-selenium and selenium-manager packages."
+fi
+
+# Set up Python path to include the package directory
+export PYTHONPATH="$FIRELYNX_PATH:$PYTHONPATH"
+
+# Launch Firelynx
+python3 "$FIRELYNX_PATH/src/main.py" "$@"
