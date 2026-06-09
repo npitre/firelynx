@@ -25,15 +25,12 @@ else
     fi
 fi
 
-# Ensure selenium-manager geckodriver is available
+# Selenium 4.x manages geckodriver automatically via its bundled selenium-manager
+# (a standalone command on some distros, an embedded module on others). If a
+# standalone command is present, pre-warm the driver cache; otherwise Selenium
+# fetches the driver on demand from Python, so there is nothing to do here.
 if command -v selenium-manager >/dev/null 2>&1; then
-    # Initialize selenium-manager geckodriver cache if needed
-    if [[ ! -f "$HOME/.cache/selenium/geckodriver/linux64/0.36.0/geckodriver" ]]; then
-        echo "Initializing geckodriver with selenium-manager..."
-        selenium-manager --browser firefox --output JSON >/dev/null 2>&1
-    fi
-else
-    echo "Warning: selenium-manager not found. Please install python3-selenium and selenium-manager packages."
+    selenium-manager --browser firefox --output JSON >/dev/null 2>&1 || true
 fi
 
 # Set up Python path to include the package directory

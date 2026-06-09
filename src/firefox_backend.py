@@ -106,6 +106,9 @@ class FirefoxBackend:
                 if self.profile_name:
                     # Use specific named profile
                     profile_path = os.path.join(profiles_dir, self.profile_name)
+                    # geckodriver fails with "Failed to set preferences" if the
+                    # profile directory doesn't exist yet — create it first.
+                    os.makedirs(profile_path, exist_ok=True)
                     self._remove_stale_profile_lock(profile_path)
                     self._clear_profile_pref(profile_path, 'general.useragent.override')
                     self._clear_profile_pref(profile_path, 'general.useragent.updates.enabled')
@@ -115,6 +118,10 @@ class FirefoxBackend:
                 else:
                     # Use persistent firelynx profile
                     firelynx_profile_path = os.path.join(profiles_dir, 'firelynx-profile')
+                    # geckodriver fails with "Failed to set preferences" if the
+                    # profile directory doesn't exist yet (e.g. the first run) —
+                    # create it first.
+                    os.makedirs(firelynx_profile_path, exist_ok=True)
                     self._remove_stale_profile_lock(firelynx_profile_path)
                     self._clear_profile_pref(firelynx_profile_path, 'general.useragent.override')
                     self._clear_profile_pref(firelynx_profile_path, 'general.useragent.updates.enabled')
