@@ -104,22 +104,35 @@ firelynx https://example.com
 ```
 
 ### Debian/Ubuntu
+
+Heads-up: Debian's packaged `python3-selenium` can't fetch geckodriver on its
+own — its bundled Selenium Manager is broken and geckodriver isn't in the Debian
+repos. The reliable path is a virtualenv with pip's Selenium, which ships a
+working driver manager. Run the steps below (and `firelynx` itself) with that
+venv active, so `python3` is the one that has Selenium.
+
 ```bash
-# Install the packages (gcc/make/libssl-dev are needed to build ProxySSL)
+# System packages (gcc/make/libssl-dev build ProxySSL; firefox-esr on Debian)
 sudo apt update
-sudo apt install python3-selenium firefox lynx gcc make libssl-dev
+sudo apt install firefox-esr lynx gcc make libssl-dev python3-venv git
 
-# Note: No additional geckodriver installation needed!
-# Modern Selenium (4.x+) automatically downloads geckodriver on first use
+# Selenium from pip in a venv — its bundled manager downloads geckodriver for you
+python3 -m venv ~/.venvs/firelynx
+source ~/.venvs/firelynx/bin/activate
+pip install selenium
 
-# Get and install Firelynx
+# Get and install Firelynx (venv still active)
 git clone https://github.com/npitre/firelynx.git
 cd firelynx/
 ./install.sh
 
-# Now you can use 'firelynx' from anywhere
+# Use it (keep the venv active in the shell you run it from)
 firelynx https://example.com
 ```
+
+Don't install `webdriver-manager` — Firelynx doesn't use it. If you prefer the
+system `python3-selenium`, you'll need to install geckodriver yourself from
+<https://github.com/mozilla/geckodriver/releases> and place it on your `PATH`.
 
 ## How to Use
 
