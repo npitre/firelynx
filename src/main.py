@@ -15,12 +15,14 @@ import traceback
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 # Import modular components
+from src import __version__
 from src.proxy_server import FirefoxProxy, setup_signal_handlers
 
 
 def main():
     """Main entry point for Firelynx"""
     parser = argparse.ArgumentParser(description='Firefox HTTP Proxy for Lynx - Accessible Browser')
+    parser.add_argument('-V', '--version', action='version', version=f'firelynx {__version__}')
     parser.add_argument('url', nargs='?', help='Starting URL for lynx')
     parser.add_argument('-p', '--port', type=int,
                         help='Proxy port (default: 8080 for --proxy-only, 8394 for normal mode)')

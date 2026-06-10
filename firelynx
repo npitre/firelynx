@@ -9,18 +9,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Check for src/main.py in the same directory first (for running from package directory)
 if [[ -f "$SCRIPT_DIR/src/main.py" ]]; then
     FIRELYNX_PATH="$SCRIPT_DIR"
-    echo "Running from package directory: $SCRIPT_DIR"
+    echo "Running from package directory: $SCRIPT_DIR" >&2
 else
     # Fall back to installed location
     FIRELYNX_PATH="$HOME/.local/share/firelynx"
 
     if [[ -d "$FIRELYNX_PATH" ]] && [[ -f "$FIRELYNX_PATH/src/main.py" ]]; then
-        echo "Using installed location: $FIRELYNX_PATH"
+        echo "Using installed location: $FIRELYNX_PATH" >&2
     else
-        echo "Error: Firelynx is not installed properly."
-        echo "Please ensure either:"
-        echo "  - src/main.py exists in current directory, or"
-        echo "  - Firelynx is properly installed with './install.sh'"
+        echo "Error: Firelynx is not installed properly." >&2
+        echo "Please ensure either:" >&2
+        echo "  - src/main.py exists in current directory, or" >&2
+        echo "  - Firelynx is properly installed with './install.sh'" >&2
         exit 1
     fi
 fi
