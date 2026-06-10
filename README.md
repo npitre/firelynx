@@ -86,8 +86,10 @@ ProxySSL, forms, and MFA — see [docs/how-it-works.md](docs/how-it-works.md).
 
 ## Installation
 
-`./install.sh` builds the bundled ProxySSL library (needed for HTTPS), so a C
-compiler and the OpenSSL headers are required in addition to Firefox and lynx.
+**Requirements:** a Linux system with Python **3.8 or newer** (3.9+ recommended
+— Selenium 4.x sets the floor), Firefox, and lynx. `./install.sh` also builds
+the bundled ProxySSL library (needed for HTTPS), so a C compiler and the OpenSSL
+headers are required.
 
 ### Fedora Linux
 ```bash

@@ -12,9 +12,15 @@ echo "Checking dependencies..."
 
 missing_deps=()
 
-# Check for Python 3
+# Check for Python 3 (3.8+ required — Selenium 4.x sets the floor)
 if ! command -v python3 >/dev/null 2>&1; then
     missing_deps+=("python3")
+elif ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)'; then
+    pyver=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+    echo "❌ Python 3.8 or newer is required, but python3 is $pyver."
+    echo "   Selenium 4.x needs 3.8+ (3.9+ recommended). Install a newer Python and"
+    echo "   run Firelynx from a virtualenv built with it — see the README."
+    exit 1
 fi
 
 # Check for Firefox
