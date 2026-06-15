@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Example Shop</title>
+<style>
+/* The "styled control" pattern used by large e-commerce UI toolkits:
+   the real form control is visually hidden (near-zero opacity) and
+   stretched over a styled wrapper that carries the visible label.
+   Screen readers still operate the real control — the accessibility
+   tree does not prune opacity-hidden elements. */
+.btn-wrap {
+    position: relative;
+    display: inline-block;
+    border: 1px solid #888;
+    border-radius: 4px;
+    padding: 8px 16px;
+    margin-right: 8px;
+    background: #f0c14b;
+}
+.btn-wrap input {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    opacity: 0.01;
+    cursor: pointer;
+}
+</style>
+</head>
+<body>
+<h1>Example Shop</h1>
+<p>Browse today's deals on garden furniture, kitchenware, and electronics.
+Sign in to see personalized recommendations and order history.</p>
+<p id="result"></p>
+
+<div role="alertdialog" aria-label="Shipping notice"
+     style="position: fixed; top: 10%; left: 15%; right: 15%; background: #fff; border: 2px solid #333; padding: 24px; z-index: 1000;">
+  <h2>Shipping notice</h2>
+  <p>We're showing you items that ship to your region. To see items that
+  ship elsewhere, change your delivery address.</p>
+  <span class="btn-wrap">
+    <input type="submit" onclick="act('dismissed'); return false;">
+    <span>Dismiss</span>
+  </span>
+  <span class="btn-wrap">
+    <input type="submit" onclick="act('address change requested'); return false;">
+    <span>Change address</span>
+  </span>
+</div>
+
+<script>
+function act(state) {
+    document.querySelector('[role="alertdialog"]').style.display = 'none';
+    document.getElementById('result').textContent = 'Notice ' + state;
+}
+</script>
+</body>
+</html>

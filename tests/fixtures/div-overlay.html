@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Example News</title>
+<style>
+body.locked { overflow: hidden; }
+#consent-backdrop {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 2147483000;
+}
+#consent-panel {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: #ffffff;
+    padding: 24px;
+    z-index: 2147483001;
+}
+</style>
+</head>
+<body class="locked">
+<h1>Example News</h1>
+<p>City council approves the riverfront park plan after a six-hour session.
+The proposal converts the disused freight yard into public green space, with
+construction expected to begin next spring and finish within two years.</p>
+<p id="result"></p>
+
+<!-- Cookie-consent style overlay: no ARIA role, no "modal"/"dialog" class,
+     no data-testid. Only geometry and the scroll lock identify it. -->
+<div id="consent-backdrop"></div>
+<div id="consent-panel">
+  <p>This site stores data such as cookies to enable required site
+  functionality, as well as personalization and analytics. You may change
+  your settings at any time or accept the default settings.</p>
+  <button onclick="consent('accepted')">Accept cookies</button>
+  <button onclick="consent('rejected')">Reject all</button>
+</div>
+
+<script>
+function consent(state) {
+    document.getElementById('consent-backdrop').style.display = 'none';
+    document.getElementById('consent-panel').style.display = 'none';
+    document.body.classList.remove('locked');
+    document.getElementById('result').textContent = 'Consent ' + state;
+}
+</script>
+</body>
+</html>

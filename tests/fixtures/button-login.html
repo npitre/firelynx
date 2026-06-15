@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign in — Example Social</title>
+</head>
+<body>
+<!-- The big-social-site login pattern: a <button> submit (not an input),
+     a <noscript> meta-refresh fallback to a degraded no-JS variant, and
+     decorative aria-hidden chrome. -->
+<noscript>
+  <meta http-equiv="refresh" content="0;url=button-login.html?_noscript=1">
+  <p>NOSCRIPT-JUNK-MARKER JavaScript is disabled in your browser.</p>
+</noscript>
+<h1>Example Social</h1>
+<p>Connect with friends and the world around you.</p>
+<form action="login" method="post">
+  <p>
+    <label for="email">Email or mobile number</label>
+    <input type="text" name="email" id="email">
+  </p>
+  <p>
+    <label for="pass">Password</label>
+    <input type="password" name="pass" id="pass">
+  </p>
+  <p><button type="submit" name="login" value="1">Log in</button></p>
+</form>
+<p><a href="/recover">Forgotten password?</a> ·
+<a href="/signup">Create new account</a></p>
+<div aria-hidden="true">
+  <span>·</span><span>·</span><span>·</span>
+</div>
+</body>
+</html>

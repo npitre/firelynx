@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Example App</title>
+</head>
+<body>
+<!-- JS-driven controls: div[role=button] / non-form <button> with click
+     handlers and no href — dead in lynx. One lives in chrome (header,
+     outside main), the rest inside the main landmark. Activation breadth
+     must follow the content filter: minimal=none, balanced=main only,
+     all=everything. -->
+<header>
+  <div role="button" onclick="act('menu opened')">Open menu</div>
+</header>
+<main>
+  <h1>Your feed</h1>
+  <p>Recent posts from people you follow.</p>
+  <p id="result">ready</p>
+  <div role="button" onclick="act('liked')">Like post</div>
+  <button type="button" onclick="act('expanded')">Show more</button>
+</main>
+<script>
+function act(state) {
+    document.getElementById('result').textContent = 'ACTION:' + state;
+}
+</script>
+</body>
+</html>

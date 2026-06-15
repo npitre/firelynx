@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Timeline</title>
+<style>
+  body { min-height: 3000px; }
+  [role="article"] { min-height: 120px; border-bottom: 1px solid #ccc; padding: 8px; }
+</style>
+</head>
+<body>
+<!-- An infinite-scroll feed: a few posts initially, more appended on every
+     scroll (up to a cap). Exercises scroll-harvest accumulation and de-dup
+     (each harvest re-sees all loaded posts; only new ones must be added). -->
+<div role="feed" aria-label="Timeline"></div>
+<script>
+var n = 0, max = 30, feed = document.querySelector('[role="feed"]');
+function addPosts(k) {
+    for (var i = 0; i < k && n < max; i++) {
+        n++;
+        var a = document.createElement('div');
+        a.setAttribute('role', 'article');
+        a.innerHTML = '<h3>Post ' + n + '</h3>' +
+            '<p>Body of post number ' + n + ', with enough text to be harvested ' +
+            'as a real feed item rather than skipped as noise.</p>';
+        feed.appendChild(a);
+    }
+}
+addPosts(3);
+window.addEventListener('scroll', function () { addPosts(3); });
+</script>
+</body>
+</html>

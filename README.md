@@ -81,13 +81,13 @@ switching between filter levels.
 
 In short: lynx talks to a small local proxy, the proxy drives a headless Firefox
 to render and run each page, and the extracted semantic content comes back to
-lynx as clean HTML. For the full architecture — content extraction, HTTPS via
-ProxySSL, forms, and MFA — see [docs/how-it-works.md](docs/how-it-works.md).
+lynx as clean HTML. For the full architecture (content extraction, HTTPS via
+ProxySSL, forms, and MFA) see [docs/how-it-works.md](docs/how-it-works.md).
 
 ## Installation
 
-**Requirements:** a Linux system with Python **3.8 or newer** (3.9+ recommended
-— Selenium 4.x sets the floor), Firefox, and lynx. `./install.sh` also builds
+**Requirements:** a Linux system with Python **3.8 or newer** (3.9+ recommended,
+since Selenium 4.x sets the floor), Firefox, and lynx. `./install.sh` also builds
 the bundled ProxySSL library (needed for HTTPS), so a C compiler and the OpenSSL
 headers are required.
 
@@ -108,7 +108,7 @@ firelynx https://example.com
 ### Debian/Ubuntu
 
 Heads-up: Debian's packaged `python3-selenium` can't fetch geckodriver on its
-own — its bundled Selenium Manager is broken and geckodriver isn't in the Debian
+own. Its bundled Selenium Manager is broken and geckodriver isn't in the Debian
 repos. The reliable path is a virtualenv with pip's Selenium, which ships a
 working driver manager. Run the steps below (and `firelynx` itself) with that
 venv active, so `python3` is the one that has Selenium.
@@ -118,7 +118,7 @@ venv active, so `python3` is the one that has Selenium.
 sudo apt update
 sudo apt install firefox-esr lynx gcc make libssl-dev python3-venv git
 
-# Selenium from pip in a venv — its bundled manager downloads geckodriver for you
+# Selenium from pip in a venv (its bundled manager downloads geckodriver for you)
 python3 -m venv ~/.venvs/firelynx
 source ~/.venvs/firelynx/bin/activate
 pip install selenium
@@ -132,7 +132,7 @@ cd firelynx/
 firelynx https://example.com
 ```
 
-Don't install `webdriver-manager` — Firelynx doesn't use it. If you prefer the
+Don't install `webdriver-manager`; Firelynx doesn't use it. If you prefer the
 system `python3-selenium`, you'll need to install geckodriver yourself from
 <https://github.com/mozilla/geckodriver/releases> and place it on your `PATH`.
 
@@ -150,6 +150,19 @@ normally would in lynx - press 'g' to go to URLs, follow links normally,
 fill out forms as usual. You now have a much greater chance for 
 JavaScript-heavy sites to work to some extent.
 
+**The content filter at the top of every page.** Each page begins with a line
+like `Content: [minimal] [balanced] [all]`. This is not part of the website; it
+is Firelynx letting you choose how much of the page to show. Select one at any
+time to switch the view instantly:
+
+- `minimal`: just the main article text (reader mode).
+- `balanced` (the default): main content, navigation, dialogs, and on-page actions.
+- `all`: nearly everything the page contains.
+
+If a page looks too empty, pick `all`; if it is too cluttered, pick `minimal`.
+Set the startup default with `--content=minimal`, `--content=balanced`, or
+`--content=all`.
+
 **For quick text output without interactive lynx:**
 ```bash
 firelynx --dump --search "python tutorial"
@@ -159,9 +172,10 @@ firelynx --dump --search "weather forecast" --engine bing
 
 ## Current Limitations
 
-**JavaScript Modal Dialogs**: Some modal dialogs (like Facebook's device 
-trust prompts) don't convert properly yet. The detection system is there 
-but needs refinement.
+**Two-click actions**: Most JavaScript dialogs and on-page buttons now convert
+to accessible links and forms. A few actions that navigate a moment after you
+activate them (for example a "trust this device" confirmation) can need two
+tries: the first registers, the second goes through.
 
 **Google Search CAPTCHAs**: Google still detects the automation and shows 
 robot verification. Use DuckDuckGo instead - it works perfectly and doesn't 
@@ -186,5 +200,5 @@ Apache License 2.0.
 
 ## License
 
-Firelynx is licensed under the Apache License, Version 2.0 — see [LICENSE](LICENSE)
+Firelynx is licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE)
 and [NOTICE](NOTICE). Copyright 2026 Nicolas Pitre.

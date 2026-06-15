@@ -5,11 +5,24 @@
  */
 function extractContentHybrid() {
     const strategies = [];
-    
+
+    // Modal containers are presented separately by the proxy's converted
+    // dialog interface (name + text + buttons). Content strategies must
+    // exclude them so dialog prose is never duplicated into page content.
+    const modalContainers = findModalContainers();
+    const inModalContainer = function (el) {
+        return modalContainers.some(function (c) { return c === el || c.contains(el); });
+    };
+
     // Strategy 1: Mozilla Readability.js (highest confidence)
     // Why: Proven in production, handles complex layouts, link density analysis
     try {
         const documentClone = document.cloneNode(true);
+        // Remove dialog markup from the clone — its content lives in the
+        // converted dialog interface, not the article
+        documentClone.querySelectorAll(
+            'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]'
+        ).forEach(function (el) { el.remove(); });
         const reader = new Readability(documentClone, {
             // Configure for accessibility - prefer semantic elements
             debug: false,
@@ -34,28 +47,22 @@ function extractContentHybrid() {
         console.warn('Readability.js extraction failed:', e.message);
     }
     
-    // Strategy 2: Accessibility-Aware Semantic Analysis (medium confidence)
-    // Why: Screen readers use these landmarks - indicates important content
-    const accessibilityResult = extractViaAccessibility();
-    if (accessibilityResult) {
-        strategies.push(accessibilityResult);
+    // Strategy 2: Landmark composition (medium-high confidence)
+    // Why: Landmarks are the page's own structure declaration for screen
+    // readers — main first, navigation collapsed, chrome omitted
+    const landmarkResult = extractViaLandmarks(inModalContainer);
+    if (landmarkResult) {
+        strategies.push(landmarkResult);
     }
-    
-    // Strategy 3: Interactive Elements Detection (high priority)
-    // Why: Modals, dialogs, and interactive elements should be actionable
-    const interactiveResult = extractInteractiveElements();
-    if (interactiveResult) {
-        strategies.push(interactiveResult);
-    }
-    
-    // Strategy 4: Enhanced Semantic Scoring (lower confidence)
+
+    // Strategy 3: Enhanced Semantic Scoring (lower confidence)
     // Why: Fallback for sites without proper semantic markup
-    const semanticResult = extractViaSemanticScoring();
+    const semanticResult = extractViaSemanticScoring(inModalContainer);
     if (semanticResult) {
         strategies.push(semanticResult);
     }
-    
-    // Strategy 5: Structured Data Enhancement
+
+    // Strategy 4: Structured Data Enhancement
     // Why: JSON-LD and microdata provide explicit content metadata
     const structuredData = extractStructuredData();
     
@@ -132,154 +139,97 @@ function shouldUseFallbackExtraction(result) {
 }
 
 /**
- * Extract content using accessibility landmarks and ARIA roles
- * Rationale: What screen readers prioritize = what users need most
+ * Escape text for safe embedding in generated HTML
  */
-function extractViaAccessibility() {
-    // Priority order based on accessibility standards
-    const landmarkSelectors = [
-        'main',                    // HTML5 main element
-        '[role="main"]',           // ARIA main landmark
-        'article',                 // HTML5 article element  
-        '[role="article"]',        // ARIA article role
-        'section',                 // HTML5 section element
-        '[role="region"][aria-labelledby]'  // Labeled regions
-    ];
-    
-    for (const selector of landmarkSelectors) {
-        const elements = document.querySelectorAll(selector);
-        for (const element of elements) {
-            const text = element.innerText?.trim() || '';
-            if (text.length > 200) {  // Require substantial content
-                return {
-                    method: 'accessibility',
-                    confidence: 0.85,
-                    title: document.title || 'No Title',
-                    content: text,
-                    htmlContent: element.innerHTML,
-                    landmark: selector,
-                    source: 'Accessibility landmarks'
-                };
-            }
-        }
-    }
-    return null;
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 /**
- * Extract interactive elements (modals, dialogs, notifications)
- * Rationale: Interactive elements often require user action and should be prominently displayed
+ * Landmark name from explicit labelling only (aria-label/aria-labelledby).
+ * Deliberately NOT the accessible-name text fallback: a landmark's innerText
+ * is its entire content, not its name.
  */
-function extractInteractiveElements() {
-    const interactiveSelectors = [
-        // Modal and dialog patterns — ARIA roles are authoritative, class names are fallback
-        '[role="dialog"]', '[role="alertdialog"]', '[aria-modal="true"]',
-        // Class-name fallbacks (only explicit modal/dialog classes, not broad UI patterns)
-        '.modal', '.dialog',
-        // data-testid hooks commonly used as modal/dialog containers
-        '[data-testid*="modal"]', '[data-testid*="dialog"]',
-    ];
-
-    const interactiveElements = [];
-
-    for (const selector of interactiveSelectors) {
-        const elements = document.querySelectorAll(selector);
-        for (const element of elements) {
-            const text = element.innerText?.trim() || '';
-            const style = window.getComputedStyle(element);
-
-            // Only include truly visible interactive elements with substantial content.
-            // offsetParent === null means display:none on self or an ancestor — the most
-            // reliable cross-browser check for "not rendered at all".
-            if (text.length > 10 &&
-                element.offsetParent !== null &&
-                style.display !== 'none' &&
-                style.visibility !== 'hidden' &&
-                style.opacity !== '0') {
-                
-                interactiveElements.push({
-                    element,
-                    text,
-                    selector: generateSelector(element),
-                    priority: getInteractivePriority(element, text)
-                });
-            }
-        }
+function landmarkName(element) {
+    const ariaLabel = element.getAttribute('aria-label');
+    if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
+    const labelledBy = element.getAttribute('aria-labelledby');
+    if (labelledBy) {
+        const text = labelledBy.split(/\s+/).map(function (id) {
+            const ref = document.getElementById(id);
+            return ref ? (ref.innerText || ref.textContent || '') : '';
+        }).join(' ').trim();
+        if (text) return text;
     }
-    
-    if (interactiveElements.length > 0) {
-        // Sort by priority (higher first)
-        interactiveElements.sort((a, b) => b.priority - a.priority);
-        
-        // Combine top interactive elements
-        const topElements = interactiveElements.slice(0, 3); // Limit to avoid spam
-        const combinedText = topElements.map((item, index) => 
-            `[INTERACTIVE ELEMENT ${index + 1}]\n${item.text}`
-        ).join('\n\n' + '═'.repeat(60) + '\n\n');
-        
-        const combinedHtml = topElements.map(item => 
-            `<div class="interactive-element">${item.element.innerHTML}</div>`
-        ).join('<hr class="interactive-separator">');
-        
-        return {
-            method: 'interactive_elements',
-            confidence: 0.9, // High confidence - interactive elements are important
-            title: document.title || 'Interactive Elements',
-            content: combinedText,
-            htmlContent: combinedHtml,
-            elementCount: topElements.length,
-            source: 'Interactive elements detection'
-        };
-    }
-    
-    return null;
+    return '';
 }
 
 /**
- * Calculate priority for interactive elements
- * Higher priority = more important to show to user
+ * Compose the page the way a screen reader presents it: the main landmark
+ * first, navigation landmarks collapsed to labelled link lists below it,
+ * banner/contentinfo/complementary omitted entirely (a braille user gets the
+ * page's purpose first, chrome never).
+ *
+ * Rationale: landmarks are the structure the page itself maintains for
+ * assistive technology — the signal redesigns are not allowed to break.
  */
-function getInteractivePriority(element, text) {
-    let priority = 50; // Base priority
-    
-    const lowerText = text.toLowerCase();
-    const className = (element.className || '').toLowerCase();
-    
-    // High priority keywords (require user action)
-    if (lowerText.includes('password') || lowerText.includes('save') || lowerText.includes('remember')) {
-        priority += 40;
-    }
-    if (lowerText.includes('notification') || lowerText.includes('alert') || lowerText.includes('warning')) {
-        priority += 35;
-    }
-    if (lowerText.includes('confirm') || lowerText.includes('approve') || lowerText.includes('accept')) {
-        priority += 30;
-    }
-    
-    // Role-based priority
-    const role = element.getAttribute('role');
-    if (role === 'dialog' || role === 'alertdialog') {
-        priority += 25;
-    }
-    
-    // Generic modal/dialog class-name signal
-    if (className.includes('modal') || className.includes('dialog')) {
-        priority += 20;
-    }
-    
-    return priority;
+function extractViaLandmarks(inModalContainer) {
+    const main = document.querySelector('main, [role="main"]');
+    if (!main || isAssistiveHidden(main) || (inModalContainer && inModalContainer(main))) return null;
+
+    const mainText = main.innerText?.trim() || '';
+    if (mainText.length < 50) return null;
+
+    const htmlParts = ['<div class="landmark-main">' + main.innerHTML + '</div>'];
+    const textParts = [mainText];
+    let navCount = 0;
+    const NAV_LINK_LIMIT = 50; // mega-menus: collapsed, not dumped wholesale
+
+    document.querySelectorAll('nav, [role="navigation"]').forEach(function (nav) {
+        if (isAssistiveHidden(nav) || main.contains(nav) || nav.contains(main)) return;
+        const links = Array.from(nav.querySelectorAll('a[href]'))
+            .map(function (a) { return { name: accessibleName(a), href: a.getAttribute('href') }; })
+            .filter(function (l) { return l.name && l.href; });
+        if (links.length === 0) return;
+
+        navCount++;
+        const heading = landmarkName(nav) || 'Navigation';
+        const shown = links.slice(0, NAV_LINK_LIMIT);
+        const items = shown.map(function (l) {
+            return '<li><a href="' + escapeHtml(l.href) + '">' + escapeHtml(l.name) + '</a></li>';
+        }).join('');
+        const more = links.length > NAV_LINK_LIMIT
+            ? '<p><em>(' + (links.length - NAV_LINK_LIMIT) + ' more links not shown)</em></p>'
+            : '';
+        htmlParts.push('<div class="landmark-nav"><h2>' + escapeHtml(heading) + '</h2><ul>' + items + '</ul>' + more + '</div>');
+        textParts.push(heading + ':\n' + shown.map(function (l) { return l.name; }).join('\n'));
+    });
+
+    return {
+        method: 'landmarks',
+        confidence: 0.88,
+        title: document.title || 'No Title',
+        content: textParts.join('\n\n'),
+        htmlContent: htmlParts.join('<hr class="landmark-separator">'),
+        navLandmarks: navCount,
+        source: 'Landmark composition (main first, navigation collapsed)'
+    };
 }
 
 /**
  * Enhanced semantic scoring system - Multi-Section Extraction
  * Rationale: Modern websites have multiple important content areas, not just one "main" area
  */
-function extractViaSemanticScoring() {
+function extractViaSemanticScoring(inModalContainer) {
     // Find all potential content containers
     const candidates = document.querySelectorAll('div, section, article, main, aside');
     const scoredElements = [];
-    
+
     for (const element of candidates) {
+        if (isAssistiveHidden(element)) continue;
+        if (inModalContainer && inModalContainer(element)) continue;
         const score = scoreElement(element);
         const textLength = element.innerText?.trim().length || 0;
         
@@ -522,56 +472,22 @@ function enhanceWithStructuredData(result, structuredData) {
 }
 
 /**
- * Combine extraction strategies to provide comprehensive page coverage
- * Why: Modern pages need interactive elements AND main content, not just one or the other
+ * Return the highest-confidence strategy, annotated with everything tried.
+ * (Modal/dialog content is no longer a content strategy: detected dialogs
+ * are rendered once, by the proxy's converted dialog interface.)
  */
 function selectBestStrategy(strategies) {
     if (strategies.length === 0) return null;
-    
-    // Sort strategies by confidence for processing order
+
     strategies.sort((a, b) => b.confidence - a.confidence);
-    
-    // COMBINATION APPROACH: Interactive elements + Main content
-    const interactiveStrategy = strategies.find(s => s.method === 'interactive_elements');
-    const contentStrategies = strategies.filter(s => s.method !== 'interactive_elements');
-    
-    if (interactiveStrategy && contentStrategies.length > 0) {
-        // Combine interactive elements with main content
-        const mainContent = contentStrategies[0];
-        
-        return {
-            method: 'combined_extraction',
-            confidence: Math.max(interactiveStrategy.confidence, mainContent.confidence),
-            title: mainContent.title || document.title,
-            content: `${interactiveStrategy.content}\n\n${'▼'.repeat(80)}\n[MAIN CONTENT]\n\n${mainContent.content}`,
-            htmlContent: `<div class="interactive-section">${interactiveStrategy.htmlContent}</div><hr class="main-content-separator"><div class="main-content-section">${mainContent.htmlContent}</div>`,
-            extractionMethods: strategies.map(s => ({
-                method: s.method,
-                confidence: s.confidence,
-                source: s.source
-            })),
-            sections: {
-                interactive: {
-                    method: interactiveStrategy.method,
-                    elementCount: interactiveStrategy.elementCount
-                },
-                mainContent: {
-                    method: mainContent.method,
-                    sections: mainContent.sections || 1
-                }
-            },
-            source: 'Combined interactive + content extraction'
-        };
-    }
-    
-    // Fallback: Return best single strategy
+
     const best = strategies[0];
     best.extractionMethods = strategies.map(s => ({
         method: s.method,
         confidence: s.confidence,
         source: s.source
     }));
-    
+
     return best;
 }
 
@@ -597,6 +513,16 @@ function createFallbackResult() {
  * Returns comprehensive result with content, links, and metadata
  */
 function executeContentExtraction() {
+    // Capture JS-driven controls (role=button) as structured data in this
+    // synchronous pass — reliable even on apps that re-render moments later.
+    // The proxy renders them as activatable links; see modal-detection.js.
+    let pageControls = [];
+    try {
+        if (typeof tagActivatablePageControls === 'function') {
+            pageControls = tagActivatablePageControls();
+        }
+    } catch (e) { /* best-effort */ }
+
     // === EXECUTE EXTRACTION ===
     const extractionResult = extractContentHybrid();
     
@@ -606,8 +532,10 @@ function executeContentExtraction() {
      * Why: Links in main content are more relevant than navigation links
      */
     let contentElement = null;
-    if (extractionResult.method === 'readability' && extractionResult.htmlContent) {
-        // For Readability results, parse the cleaned HTML
+    if ((extractionResult.method === 'readability' || extractionResult.method === 'landmarks') &&
+        extractionResult.htmlContent) {
+        // For composed/cleaned HTML results, parse that HTML so the link list
+        // matches what the user actually sees (including collapsed navigation)
         const tempDiv = document.createElement('div');
         tempDiv.innerHTML = extractionResult.htmlContent;
         contentElement = tempDiv;
@@ -615,10 +543,13 @@ function executeContentExtraction() {
         // For other methods, try to find the source element
         contentElement = document.querySelector('main, article, [role="main"]') || document.body;
     }
-    
+
+    // Accessible names give icon links usable labels; assistive-hidden links
+    // are skipped just as a screen reader would skip them.
     const links = Array.from((contentElement || document).querySelectorAll('a[href]'))
+        .filter(link => !isAssistiveHidden(link))
         .map(link => ({
-            text: (link.innerText || link.textContent || '').trim(),
+            text: accessibleName(link).trim(),  // from modal-detection.js, always bundled first
             url: link.href
         }))
         .filter(link => link.text && link.text.length > 0 && link.url && !link.url.startsWith('javascript:'));
@@ -653,7 +584,8 @@ function executeContentExtraction() {
         
         // Interactive elements
         modalElements: modalElements,
-        
+        pageControls: pageControls,
+
         // Metadata
         url: window.location.href,
         author: extractionResult.author,

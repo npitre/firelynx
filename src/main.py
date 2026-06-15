@@ -168,7 +168,7 @@ def main():
                     # Navigate to the URL and extract page data
                     proxy.firefox_backend.driver.get(args.url)
                     proxy.firefox_backend.hide_webdriver_traces()
-                    proxy.firefox_backend.wait_for_interactive_elements_stable()
+                    proxy.firefox_backend.wait_for_page_settle()
 
                     # Extract page data (dict format)
                     page_data = proxy.firefox_backend.extract_page_data()

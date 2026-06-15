@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign up</title>
+</head>
+<body>
+<h1>Sign up</h1>
+<p>Enter your email address.</p>
+<!-- Submit-time validation: the page intercepts submit, and on invalid input
+     calls preventDefault() and shows an inline error WITHOUT navigating. This
+     is the kind of error-checking that fires the change/input events in
+     Firefox at submit time (via Selenium send_keys + click), so the error
+     surfaces to lynx after the submit round-trip — what we tell users to
+     expect (live per-keystroke validation is out of reach; submit-time is not). -->
+<form method="post" action="">
+  <p>
+    <label for="email">Email</label>
+    <input type="text" name="email" id="email">
+  </p>
+  <p><input type="submit" value="Sign up"></p>
+  <p id="error"></p>
+</form>
+<script>
+document.querySelector('form').addEventListener('submit', function (e) {
+    var value = document.getElementById('email').value;
+    if (value.indexOf('@') === -1) {
+        e.preventDefault();
+        document.getElementById('error').textContent =
+            'VALIDATION-ERROR: email must contain @';
+    }
+});
+</script>
+</body>
+</html>

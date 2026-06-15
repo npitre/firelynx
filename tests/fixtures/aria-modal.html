@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Example Store</title>
+</head>
+<body>
+<h1>Example Store</h1>
+<p>Welcome to the Example Store catalog. Browse seasonal offers, track your
+orders, and manage your account from this page. Today's featured category is
+garden tools, with discounts on hand trowels, pruning shears, and watering
+cans while stocks last.</p>
+<p><a href="/catalog">Browse the catalog</a> | <a href="/orders">Your orders</a></p>
+<p id="result"></p>
+
+<div id="dlg" role="dialog" aria-modal="true" aria-label="Cookie preferences"
+     style="position: fixed; top: 20%; left: 20%; right: 20%; background: #fff; border: 2px solid #333; padding: 24px; z-index: 1000;">
+  <h2>Cookie preferences</h2>
+  <p>We use cookies to improve your shopping experience. Choose an option to continue to the store.</p>
+  <button onclick="closeDialog('saved')">Accept</button>
+  <button onclick="closeDialog('rejected')">Cancel</button>
+</div>
+
+<script>
+function closeDialog(state) {
+    document.getElementById('dlg').style.display = 'none';
+    document.getElementById('result').textContent = 'Preferences ' + state;
+}
+</script>
+</body>
+</html>

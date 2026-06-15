@@ -12,6 +12,82 @@ from .utils.javascript_loader import load_js_file
 
 logger = logging.getLogger(__name__)
 
+
+def apply_assistive_semantics(page_data):
+    """Post-process extracted HTML with the page's assistive-technology semantics.
+
+    The JavaScript extraction layer already skips assistive-hidden *containers*,
+    but selected content can still carry hidden *descendants* (decorative
+    icons, app shells inside a kept section). This pass applies the same
+    screen-reader contract to the final HTML lynx will see:
+
+    1. Remove subtrees marked aria-hidden="true" or inert — the page itself
+       declares them irrelevant to assistive technology. Guarded: if removal
+       would leave almost nothing (broken markup hiding everything), keep the
+       original so the user never gets a blank page.
+    2. Give text-less links their accessible name (aria-label) as visible
+       text, so icon links render as words in lynx instead of disappearing.
+    """
+    html_content = page_data.get('htmlContent', '')
+    if not html_content:
+        return page_data
+
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        logger.warning("BeautifulSoup not available for assistive semantics pass")
+        return page_data
+
+    try:
+        soup = BeautifulSoup(html_content, 'html.parser')
+        changed = False
+
+        hidden = soup.select('[aria-hidden="true"], [inert]')
+        if hidden:
+            total_text = len(soup.get_text(strip=True))
+            for element in hidden:
+                element.decompose()
+            remaining_text = len(soup.get_text(strip=True))
+            if remaining_text >= 100 or total_text < 100:
+                changed = True
+                page_data.setdefault('extraction', {})['assistiveHiddenRemoved'] = len(hidden)
+                logger.debug(f"♿ Removed {len(hidden)} assistive-hidden subtrees "
+                             f"({total_text - remaining_text} chars)")
+            else:
+                # Removal would blank the page - keep the original markup
+                soup = BeautifulSoup(html_content, 'html.parser')
+                logger.debug("♿ Skipped assistive-hidden removal (would leave no content)")
+
+        labelled = 0
+        for link in soup.find_all('a'):
+            aria_label = (link.get('aria-label') or '').strip()
+            if aria_label and not link.get_text(strip=True):
+                link.string = aria_label
+                labelled += 1
+        if labelled:
+            changed = True
+            logger.debug(f"♿ Labelled {labelled} text-less links from aria-label")
+
+        # Firefox executed the page's JavaScript, so <noscript> fallbacks are
+        # wrong here — and lynx renders them (often a meta-refresh redirect to
+        # a degraded no-JS variant, e.g. Facebook's _fb_noscript)
+        noscript_junk = soup.find_all('noscript') + soup.find_all(
+            'meta', attrs={'http-equiv': re.compile(r'^refresh$', re.IGNORECASE)})
+        for element in noscript_junk:
+            element.decompose()
+        if noscript_junk:
+            changed = True
+            logger.debug(f"🧹 Removed {len(noscript_junk)} noscript/meta-refresh elements")
+
+        if changed:
+            page_data['htmlContent'] = str(soup)
+
+    except Exception as e:
+        logger.warning(f"Assistive semantics pass failed: {e}")
+
+    return page_data
+
+
 class ContentProcessor:
     def __init__(self, firefox_backend, show_search_form=False):
         self.firefox_backend = firefox_backend
@@ -155,6 +231,9 @@ class ContentProcessor:
         # Generate content filter selector
         filter_selector = self.generate_filter_selector(filter_level)
 
+        # Activatable JS-driven controls (role=button), gated by filter level
+        page_controls = self.render_page_controls(page_data, filter_level)
+
         # Generate final HTML
         html_template = f"""<!DOCTYPE html>
 <html>
@@ -170,6 +249,7 @@ class ContentProcessor:
 {filter_selector}
 {mfa_notice}
 {search_form}
+{page_controls}
 <hr>
 {content_html}
 </body>
@@ -333,6 +413,59 @@ class ContentProcessor:
 
         return html_content
 
+    def render_page_controls(self, page_data, filter_level):
+        """Render JS-driven controls (role=button) the extractor captured as an
+        activatable section for lynx, gated by the content filter:
+
+          - minimal:  nothing (reader mode) — only blocking dialogs surface
+          - balanced: controls inside the main content landmark
+          - all:      every captured control
+
+        Each becomes a link to /click-control, which clicks the real element in
+        Firefox and re-extracts. We render from the structured `pageControls`
+        list (captured synchronously at extraction) rather than from the HTML,
+        because app pages (the Facebook feed) re-render and wipe inline markers,
+        and Readability-extracted HTML drops the controls entirely.
+        """
+        all_controls = page_data.get('pageControls') or []
+        # Diagnostic: what the extractor captured (essential for screens we
+        # can't reproduce offline, e.g. Facebook's device-trust interstitial)
+        if all_controls:
+            main_n = sum(1 for c in all_controls if c.get('main'))
+            logger.info(f"⚡ Page controls captured: {len(all_controls)} "
+                        f"({main_n} in main) — {[c.get('name','') for c in all_controls][:20]}")
+
+        if filter_level == 'minimal':
+            return ''
+
+        controls = all_controls
+        if filter_level == 'balanced':
+            main_controls = [c for c in controls if c.get('main')]
+            # If the page has a main landmark, show its controls; if NONE are in
+            # main (a landmark-less interstitial like the device-trust screen),
+            # "main-only" is meaningless — the controls ARE the page, so show them
+            controls = main_controls if main_controls else controls
+        if not controls:
+            return ''
+
+        from src import proxy_server
+        PROXY_BASE_URL = proxy_server.PROXY_BASE_URL
+        from urllib.parse import quote
+
+        links = []
+        for c in controls:
+            name = (c.get('name') or '').strip()
+            cid = c.get('id', '')
+            if not name:
+                continue
+            href = f"{PROXY_BASE_URL}/click-control?id={quote(cid)}&name={quote(name)}"
+            links.append(f'<a href="{html.escape(href)}">[{html.escape(name)}]</a>')
+        if not links:
+            return ''
+
+        return ('<div style="border:1px solid #888; padding:8px; margin:8px 0;">'
+                '<strong>Page actions:</strong> ' + ' '.join(links) + '</div>')
+
     def convert_non_functional_buttons(self, html_content):
         """
         Convert non-functional button elements into accessible alternatives for lynx.
@@ -362,6 +495,22 @@ class ContentProcessor:
             for button in buttons:
                 button_text = button.get_text(strip=True)
 
+                # Submit-capable buttons inside forms must stay submittable:
+                # convert to <input type="submit"> which lynx understands.
+                # (A <button> defaults to type="submit".) The label becomes
+                # the input's value; the real submission is performed by
+                # Firefox clicking the page's actual button, so the exact
+                # submitted value of this control does not matter.
+                button_type = (button.get('type') or 'submit').lower()
+                if button_type == 'submit' and button.find_parent('form'):
+                    replacement = soup.new_tag('input')
+                    replacement['type'] = 'submit'
+                    replacement['value'] = button_text or 'Submit'
+                    if button.get('name'):
+                        replacement['name'] = button['name']
+                    button.replace_with(replacement)
+                    continue
+
                 # Check if button is a dropdown/menu toggle
                 # Common patterns: aria-expanded, js-details-target, classes with "toggle" or "dropdown"
                 is_dropdown_toggle = (
@@ -382,6 +531,36 @@ class ContentProcessor:
                     else:
                         # Remove empty buttons entirely
                         button.decompose()
+
+            # Ensure every form has a LABELED submit control. Modern sites
+            # (Facebook among them) pair a hidden unlabeled <input type=submit>
+            # (for Enter-key submission) with a styled [role="button"] div that
+            # carries the visible label — dead markup in lynx. Promote that
+            # div's accessible name to a real submit input. The actual
+            # submission is performed by Firefox clicking the page's own
+            # controls, so the substitute's name/value don't matter.
+            for form in soup.find_all('form'):
+                submit_inputs = [inp for inp in form.find_all('input')
+                                 if (inp.get('type') or '').lower() == 'submit']
+                if any((inp.get('value') or '').strip() for inp in submit_inputs):
+                    continue  # already has a labeled submit
+
+                for div_button in form.find_all(attrs={'role': 'button'}):
+                    if div_button.name == 'a':
+                        continue  # links work in lynx as-is
+                    label = ((div_button.get('aria-label') or '').strip() or
+                             div_button.get_text(strip=True))
+                    if not label:
+                        continue
+                    replacement = soup.new_tag('input')
+                    replacement['type'] = 'submit'
+                    replacement['value'] = label
+                    div_button.replace_with(replacement)
+                    # The unlabeled helpers would render as a bare confusing
+                    # "Submit" next to the labeled one - drop them
+                    for inp in submit_inputs:
+                        inp.decompose()
+                    break  # one labeled submit per form is enough
 
             return str(soup)
 

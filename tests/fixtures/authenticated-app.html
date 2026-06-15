@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Accueil</title>
+</head>
+<body>
+<!-- A logged-in app page (localized, non-English) with app chrome you only
+     get after signing in, plus a stray input whose name contains "code"
+     (a promo code) and incidental security wording. None of this is an auth
+     challenge — the authenticated-session override must suppress any MFA
+     prompt regardless of the localized UI. -->
+<!-- Some logged-in apps keep a HIDDEN one-time-code input (WebOTP autofill)
+     on authenticated pages; it previously tripped a false MFA prompt. A hidden
+     field is not a challenge. -->
+<input type="text" autocomplete="one-time-code" style="display:none">
+<nav role="navigation">
+  <a href="/messages/">Messages</a>
+  <a href="/notifications">Notifications</a>
+  <a href="/friends/">Ami(e)s</a>
+  <a href="/logout">Déconnexion</a>
+</nav>
+<main>
+  <h1>Quoi de neuf ?</h1>
+  <p>Bienvenue. Voici les dernières nouvelles de vos ami(e)s.</p>
+  <p>Pour votre sécurité, vérifiez régulièrement vos paramètres.</p>
+  <form action="/promo" method="post">
+    <label for="promo_code">Code promo</label>
+    <input type="text" name="promo_code" id="promo_code">
+    <input type="submit" value="Appliquer">
+  </form>
+</main>
+</body>
+</html>

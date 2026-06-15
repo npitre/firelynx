@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Example Dashboard</title>
+</head>
+<body>
+<!-- The application marks its entire UI aria-hidden while the session dialog
+     is open — the standard pattern major sites use to signal modality to
+     screen readers. A screen reader user hears ONLY the dialog. -->
+<div id="app" aria-hidden="true">
+  <h1>Example Dashboard</h1>
+  <p>BACKGROUND-ONLY-MARKER Your account overview: three projects are active,
+  two invoices are awaiting payment, and the weekly report is ready for
+  review. Recent activity shows nine commits, four merged changes, and one
+  open discussion that mentions you directly.</p>
+  <p><a href="/projects">Projects</a> | <a href="/invoices">Invoices</a> |
+  <a href="/reports">Reports</a> | <a href="/settings">Settings</a></p>
+</div>
+
+<div role="dialog" aria-modal="true" aria-label="Session expiring"
+     style="position: fixed; top: 30%; left: 25%; right: 25%; background: #fff; border: 2px solid #333; padding: 24px; z-index: 1000;">
+  <h2>Session expiring</h2>
+  <p>Your session is about to expire due to inactivity. Do you want to stay
+  signed in?</p>
+  <button onclick="alert('stay')">Stay signed in</button>
+  <button onclick="alert('out')">Log out</button>
+</div>
+</body>
+</html>

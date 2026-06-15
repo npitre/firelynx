@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Connexion</title>
+</head>
+<body>
+<!-- A bare post-login interstitial (a "trust this device?" style screen): no
+     main landmark, no form — the two role=button choices ARE the whole page. The
+     "Page actions" list must surface them even at the default balanced filter
+     (where there are no main-landmark controls to restrict to). -->
+<h1>Vous êtes connecté. Faire confiance à cet appareil ?</h1>
+<p>Pour vous connecter plus rapidement, faites confiance à cet appareil afin
+d'ignorer désormais l'étape qui confirme qu'il s'agit de vous.</p>
+<p id="result"></p>
+<div role="button" onclick="act('trusted')">Faire confiance</div>
+<div role="button" onclick="act('not now')">Ne pas faire confiance</div>
+<script>
+function act(state) {
+    document.getElementById('result').textContent = 'CHOICE:' + state;
+}
+</script>
+</body>
+</html>

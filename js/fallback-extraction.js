@@ -14,14 +14,22 @@
 function extractContentFallback() {
     // Strategy: Extract content from multiple significant page areas
     // without being overly selective about what constitutes "main content"
-    
+
     const contentAreas = [];
-    
+
+    // Detected dialogs are rendered by the proxy's converted dialog interface;
+    // even the permissive pass must not duplicate their content into the page.
+    const modalContainers = findModalContainers();
+    const inModalContainer = function (el) {
+        return modalContainers.some(function (c) { return c === el || c.contains(el); });
+    };
+
     // 1. Try semantic HTML5 landmarks first (most reliable)
     const landmarks = ['main', 'section', 'article', 'nav', 'aside'];
     for (const tag of landmarks) {
         const elements = document.querySelectorAll(tag);
         for (const element of elements) {
+            if (isAssistiveHidden(element) || inModalContainer(element)) continue;
             const text = element.innerText?.trim() || '';
             if (text.length > 50) {  // Very low threshold - include more content
                 contentAreas.push({
@@ -47,6 +55,7 @@ function extractContentFallback() {
         for (const selector of selectors) {
             const elements = document.querySelectorAll(selector);
             for (const element of elements) {
+                if (isAssistiveHidden(element) || inModalContainer(element)) continue;
                 const text = element.innerText?.trim() || '';
                 if (text.length > 100) {
                     contentAreas.push({
@@ -65,6 +74,7 @@ function extractContentFallback() {
     if (contentAreas.length === 0) {
         const bodyChildren = Array.from(document.body.children);
         for (const child of bodyChildren) {
+            if (isAssistiveHidden(child) || inModalContainer(child)) continue;
             const text = child.innerText?.trim() || '';
             if (text.length > 30) {  // Very permissive threshold
                 contentAreas.push({
@@ -195,6 +205,14 @@ function removeNestedContent(contentAreas) {
  * Execute fallback extraction - main entry point
  */
 function executeFallbackExtraction() {
+    // Capture JS-driven controls as structured data (see content-extraction.js)
+    let pageControls = [];
+    try {
+        if (typeof tagActivatablePageControls === 'function') {
+            pageControls = tagActivatablePageControls();
+        }
+    } catch (e) { /* best-effort */ }
+
     const extractionResult = extractContentFallback();
     
     if (!extractionResult) {
@@ -212,12 +230,14 @@ function executeFallbackExtraction() {
         };
     }
     
-    // Extract links from all content areas (more permissive)
+    // Extract links from all content areas (more permissive), but never from
+    // content the page hides from assistive technology
     const allLinks = [];
     const linkElements = document.querySelectorAll('a[href]');
-    
+
     for (const link of linkElements) {
-        const text = (link.innerText || link.textContent || '').trim();
+        if (isAssistiveHidden(link)) continue;
+        const text = accessibleName(link).trim();  // from modal-detection.js, always bundled first
         const url = link.href;
         
         if (text && url && !url.startsWith('javascript:') && text.length > 0) {
@@ -235,7 +255,10 @@ function executeFallbackExtraction() {
         // Links - include more links for better navigation
         links: allLinks,
         debug_links: allLinks.slice(0, 10).map(l => `"${l.text.substring(0, 30)}" -> ${l.url}`).join('; '),
-        
+
+        // JS-driven controls captured for proxy activation
+        pageControls: pageControls,
+
         // Metadata
         url: window.location.href,
         

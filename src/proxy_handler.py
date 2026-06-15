@@ -77,6 +77,14 @@ class HTTPProxyHandler(BaseHTTPRequestHandler):
                 # Handle search form submissions
                 self.handle_search()
                 return
+            elif internal_path.startswith('/click-control'):
+                # Activate an in-content JS control (role=button) the user followed
+                self.handle_click_control()
+                return
+            elif internal_path.startswith('/load-more'):
+                # Harvest the next batch of an infinite-scroll feed
+                self.handle_load_more()
+                return
             else:
                 # Unknown internal command
                 self.send_error(404, f"Unknown internal command: {internal_path}")
@@ -86,13 +94,23 @@ class HTTPProxyHandler(BaseHTTPRequestHandler):
         if url.startswith(('http://', 'https://')):
             target_url = url
         elif url.startswith('/'):
-            # Absolute path - need to reconstruct with host
-            host = self.headers.get('Host', 'localhost')
+            # Absolute path - need to reconstruct with host. A present-but-empty
+            # Host header must still fall back to localhost, never ''
+            host = self.headers.get('Host') or 'localhost'
             scheme = 'https' if self.server.default_https else 'http'
             target_url = f"{scheme}://{host}{url}"
         else:
             # Relative URL - prepend https
             target_url = f"https://{url}"
+
+        # Reject malformed targets (e.g. "https://" / "https:///") with a clean
+        # error instead of handing them to Firefox, which throws an opaque
+        # InvalidArgumentException
+        parsed_target = urlparse(target_url)
+        if not parsed_target.scheme or not parsed_target.netloc:
+            logger.warning(f"Rejecting malformed target URL: {target_url!r}")
+            self.send_error(400, f"Malformed URL: {target_url}")
+            return
 
         try:
             # Check if we have cached result for this URL
@@ -202,9 +220,24 @@ class HTTPProxyHandler(BaseHTTPRequestHandler):
                         real_url = 'https://' + real_url
             else:
                 # Direct URL request
-                real_url = self.path.lstrip('/')
-                if not real_url.startswith(('http://', 'https://')):
-                    real_url = 'https://' + real_url
+                if self.path.startswith(('http://', 'https://')):
+                    real_url = self.path
+                else:
+                    # Origin-form request (e.g. "POST /path" over a CONNECT
+                    # tunnel): reconstruct the host from the Host header rather
+                    # than blindly prepending https:// to a host-less path
+                    host = self.headers.get('Host') or 'localhost'
+                    scheme = 'https' if self.server.default_https else 'http'
+                    path = self.path if self.path.startswith('/') else '/' + self.path
+                    real_url = f"{scheme}://{host}{path}"
+
+            # Reject malformed targets with a clean 400 instead of crashing
+            # Firefox with an opaque InvalidArgumentException
+            parsed_real = urlparse(real_url)
+            if not parsed_real.scheme or not parsed_real.netloc:
+                logger.warning(f"Rejecting malformed POST target: {real_url!r}")
+                self.send_error(400, f"Malformed URL: {real_url}")
+                return
 
             logger.info(f"POST request to: {real_url}")
 
@@ -630,40 +663,48 @@ class HTTPProxyHandler(BaseHTTPRequestHandler):
             form_data = parse_qs(post_data)
 
             # Modal buttons use a single inline form (same pattern as the filter
-            # buttons): the clicked submit button's name encodes "action|element_id".
+            # buttons): the clicked submit button's name encodes "action|element_id"
+            # and its value carries the button's "[Label]" — the accessible name
+            # used to re-resolve the element if it was re-rendered away.
             action = ''
             element_id = ''
+            label = ''
             for param_name, param_values in form_data.items():
                 if '|' in param_name and param_values:
                     parts = param_name.split('|', 1)
                     if len(parts) == 2:
                         action, element_id = parts
+                        label = param_values[0].strip().strip('[]').strip()
                         break
 
-            logger.info(f"Modal action: {action}, element_id: {element_id}")
+            logger.info(f"Modal action: {action}, element_id: {element_id}, label: {label!r}")
 
             if not action:
                 self.send_error(400, "Missing action parameter")
                 return
 
             # Load modal functions and execute the click action
+            import json
             modal_js = load_js_file('modal-detection.js')
 
             click_js = f"""
             {modal_js}
 
             // Execute the modal click using the external function
-            return clickModalElement('{element_id}', '{action}');
+            return clickModalElement({json.dumps(element_id)}, {json.dumps(action)}, {json.dumps(label)});
             """
 
             # Execute the click action
-            success = self.server.firefox_backend.driver.execute_script(click_js)
+            result = self.server.firefox_backend.driver.execute_script(click_js)
+            clicked = bool(result) and result.get('success')
 
-            if success:
-                logger.info(f"✅ Modal action '{action}' executed successfully")
+            if clicked:
+                logger.info(f"✅ Modal action '{action}' executed via {result.get('method')}")
 
-                # Wait for page to update after the action
-                time.sleep(1.5)
+                # Wait for the page to settle after the action (the click may
+                # mutate the DOM or navigate) before re-extracting
+                backend = self.server.firefox_backend
+                backend.wait_for_page_settle(*backend.SETTLE_ACTION)
 
                 # Get updated page content
                 page_data = self.server.firefox_backend.extract_content_from_current_page()
@@ -684,7 +725,8 @@ class HTTPProxyHandler(BaseHTTPRequestHandler):
                 )
 
             else:
-                logger.warning(f"❌ Modal action '{action}' failed - element not found or not clickable")
+                reason = (result or {}).get('reason', 'element not found or not clickable')
+                logger.warning(f"❌ Modal action '{action}' failed - {reason}")
                 # Still get current page data to show user what's available
                 page_data = self.server.firefox_backend.extract_content_from_current_page()
 
@@ -692,7 +734,7 @@ class HTTPProxyHandler(BaseHTTPRequestHandler):
                 error_notice = f'''
                 <div style="border: 2px solid red; padding: 10px; margin: 10px; background: #ffe6e6;">
                     <h3>⚠️ ACTION FAILED</h3>
-                    <p>Could not execute modal action: <strong>{action}</strong></p>
+                    <p>Could not execute modal action: <strong>{html.escape(label or action)}</strong></p>
                     <p>The dialog element may have changed or disappeared.</p>
                 </div>
                 '''
@@ -713,6 +755,55 @@ class HTTPProxyHandler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Error handling modal action: {e}")
             self.send_error(500, f"Modal action failed: {str(e)}")
+
+    def handle_click_control(self):
+        """Activate an in-content JS control (role=button) the user followed in lynx.
+
+        Mirrors handle_modal_action: click the real element in Firefox by its
+        tagged id (fallback: accessible name), settle, re-extract, and redirect
+        back to the page URL so lynx's address bar is preserved. Reached via a
+        GET link the extractor produced (see activate_page_controls).
+        """
+        try:
+            import json
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            control_id = params.get('id', [''])[0]
+            name = params.get('name', [''])[0]
+
+            if not control_id and not name:
+                self.send_error(400, "Missing control id/name")
+                return
+
+            logger.info(f"Page control click: id={control_id!r} name={name!r}")
+
+            modal_js = load_js_file('modal-detection.js')
+            click_js = f"""
+            {modal_js}
+            return clickPageControl({json.dumps(control_id)}, {json.dumps(name)});
+            """
+            result = self.server.firefox_backend.driver.execute_script(click_js)
+
+            backend = self.server.firefox_backend
+            if result and result.get('success'):
+                logger.info(f"✅ Page control click succeeded via {result.get('method')}")
+                backend.wait_for_page_settle(*backend.SETTLE_ACTION)
+            else:
+                reason = (result or {}).get('reason', 'control not found')
+                logger.warning(f"❌ Page control click failed - {reason}")
+
+            # Re-extract either way so the user sees the current state
+            page_data = backend.extract_content_from_current_page()
+            html_content = self.create_html_output(page_data)
+            original_url = page_data.get('url', page_data.get('display_url', ''))
+            self.cache_and_redirect(
+                html_content=html_content,
+                original_url=original_url,
+                operation_name=f"control: {name or control_id}")
+
+        except Exception as e:
+            logger.error(f"Error handling control click: {e}")
+            self.send_error(500, f"Control click failed: {str(e)}")
 
     def handle_filter_change_post(self, post_data):
         """Handle content filter changes from form button submissions"""
@@ -766,9 +857,14 @@ class HTTPProxyHandler(BaseHTTPRequestHandler):
             self.send_error(500, f"Filter change failed: {str(e)}")
 
 
-    def cache_and_redirect(self, html_content, original_url, operation_name):
+    def cache_and_redirect(self, html_content, original_url, operation_name, fragment=None):
         """
         Cache HTML content and redirect back to original URL to preserve lynx address bar.
+
+        `fragment` (optional) appends "#<fragment>" to the redirect Location so
+        lynx positions on a named anchor in the served page (used by "Load more
+        posts" to focus the first new post). The cache key stays the plain URL,
+        since lynx requests it without the fragment.
 
         WHY THIS IS NEEDED:
 
@@ -821,18 +917,69 @@ class HTTPProxyHandler(BaseHTTPRequestHandler):
                 'operation': operation_name
             }
 
-            # Send redirect back to original URL
+            # Send redirect back to original URL (with optional #anchor so lynx
+            # positions on a named anchor in the served page)
+            location = original_url + (f'#{fragment}' if fragment else '')
             self.send_response(302, 'Found')
-            self.send_header('Location', original_url)
+            self.send_header('Location', location)
             self.send_no_cache_headers()
             self.end_headers()
 
-            logger.info(f"✅ {operation_name} completed, redirecting to: {original_url}")
+            logger.info(f"✅ {operation_name} completed, redirecting to: {location}")
 
         except Exception as e:
             logger.error(f"Error in cache_and_redirect for {operation_name}: {e}")
             self.send_error(500, f"{operation_name} failed: {str(e)}")
 
+
+    def handle_load_more(self):
+        """Harvest the next batch of an infinite-scroll feed and focus the first
+        new post.
+
+        Scrolls the live Firefox feed further, appends the newly-harvested posts
+        to the accumulated feed_state, re-renders the whole feed, and redirects
+        lynx back to the page URL with a #fxpost-<first-new> fragment so it lands
+        on the first newly-loaded post instead of the top.
+        """
+        try:
+            parsed = urlparse(self.path)
+            url = parse_qs(parsed.query).get('url', [''])[0]
+            url = unquote(url)
+            if not url:
+                self.send_error(400, "Missing url parameter")
+                return
+
+            backend = self.server.firefox_backend
+            state = backend.feed_state.get(url)
+            if state is None:
+                # No accumulated state (e.g. Firefox navigated away) — just
+                # reload the page fresh through the normal path
+                logger.info("Load more: no feed state, falling back to fetch")
+                self.send_lynx_response(backend.fetch_page(url))
+                return
+
+            first_new_index = len(state['posts'])
+            new_posts, end = backend.harvest_feed(state['seen'], backend.FEED_LOADMORE_BATCH)
+            state['posts'].extend(new_posts)
+            state['exhausted'] = end
+            logger.info(f"📜 Load more: +{len(new_posts)} posts "
+                        f"(total {len(state['posts'])}, end={end})")
+
+            page_data = backend.render_feed_state(url)
+            html_content = self.create_html_output(page_data)
+
+            # Focus the first new post if any were added, else the load-more/end marker
+            fragment = f'fxpost-{first_new_index}' if new_posts else (
+                'fxend' if end else 'fxmore')
+            self.cache_and_redirect(
+                html_content=html_content,
+                original_url=url,
+                operation_name=f"load more (+{len(new_posts)})",
+                fragment=fragment)
+
+        except Exception as e:
+            logger.error(f"Error handling load more: {e}")
+            self.send_error(500, f"Load more failed: {str(e)}")
 
     def handle_form_submit(self, post_data):
         """Handle regular form submissions to external sites via proxy"""
@@ -848,15 +995,26 @@ class HTTPProxyHandler(BaseHTTPRequestHandler):
 
             target_url = unquote(target_url)
 
+            # Reject a malformed/empty target before it reaches Firefox
+            parsed_target = urlparse(target_url)
+            if not parsed_target.scheme or not parsed_target.netloc:
+                logger.warning(f"Rejecting malformed form target: {target_url!r}")
+                self.send_error(400, f"Malformed form target: {target_url}")
+                return
+
             logger.info(f"🔄 Form submission to: {target_url}")
 
-            # Submit the form using Firefox
+            # Login-shaped submissions can take 5-15s (auth, MFA); use the same
+            # immediate-redirect/background-polling path as the direct do_POST
+            # route so lynx doesn't time out. Other forms submit synchronously.
+            if self.is_form_submission(target_url, post_data):
+                logger.info("Detected login-shaped submission - using background polling")
+                self.send_immediate_form_response(target_url, post_data)
+                return
+
             page_data = self.server.firefox_backend.submit_form(target_url, post_data, dict(self.headers))
-
-            # Send the response back to lynx
-            html_content = self.create_html_output(page_data)
-
-            self.send_lynx_response(html_content)
+            self.server.last_base_url = page_data.get('url', target_url)
+            self.send_lynx_response(self.create_html_output(page_data))
 
         except Exception as e:
             logger.error(f"Error handling form submission: {e}")

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign in — Example</title>
+</head>
+<body>
+<h1>Sign in</h1>
+<p>Enter your details to continue.</p>
+<!-- Empty action: Firefox resolves it to this page's own URL on submit, and
+     the proxy must absolutize it for lynx (the regression that produced
+     "https://"). A password field routes this through the login/polling path. -->
+<form method="post" action="">
+  <p>
+    <label for="user">Username</label>
+    <input type="text" name="user" id="user">
+  </p>
+  <p>
+    <label for="pass">Password</label>
+    <input type="password" name="pass" id="pass">
+  </p>
+  <p><input type="submit" value="Sign in"></p>
+</form>
+</body>
+</html>

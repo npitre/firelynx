@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Example App</title>
+</head>
+<body>
+<!-- An app shell: a search form in the chrome plus a substantial main/feed
+     landmark, with low TOTAL visible text (a logged-in feed before it fully
+     streams in looks like this). The old heuristic (form present + text <
+     2000) raw-dumped the whole body, burying the feed under chrome. With a
+     substantial main landmark it must use landmark extraction instead:
+     main first, chrome omitted. -->
+<header role="banner">
+  <form action="/search" method="get">
+    <input type="text" name="q" placeholder="Search">
+    <input type="submit" value="Search">
+  </form>
+  <p>SHELL-CHROME-MARKER app promo bar and header junk</p>
+</header>
+<main role="main">
+  <h1>Latest updates</h1>
+  <p>The riverfront restoration finished ahead of schedule this spring, with
+  native plantings already drawing migratory birds back to the channel. City
+  crews report the new boardwalk has held up well through two storms, and the
+  adjacent meadow is being seeded next month for summer bloom.</p>
+</main>
+<footer>
+  <p>FOOTER-CHROME-MARKER copyright and legal links</p>
+</footer>
+</body>
+</html>

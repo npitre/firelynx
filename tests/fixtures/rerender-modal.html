@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Example App</title>
+</head>
+<body>
+<h1>Example App</h1>
+<p>A single-page application that continuously re-renders its dialog, the way
+framework-driven sites do. Any element reference captured at extraction time
+is stale by the time the user acts on it.</p>
+<p id="result"></p>
+
+<div id="dlg" role="dialog" aria-modal="true" aria-label="Data sharing"
+     style="position: fixed; top: 20%; left: 20%; right: 20%; background: #fff; border: 2px solid #333; padding: 24px; z-index: 1000;">
+  <h2>Data sharing</h2>
+  <p>Share anonymous usage data to help improve the product?</p>
+  <div id="dlg-buttons">
+    <button onclick="choose('accepted')">Accept</button>
+    <button onclick="choose('declined')">Decline</button>
+  </div>
+</div>
+
+<script>
+// Re-render the dialog's buttons from a template every 300ms, recreating the
+// DOM nodes (and discarding any attributes added to them since).
+var buttonBox = document.getElementById('dlg-buttons');
+var TEMPLATE = buttonBox.innerHTML;
+var rerender = setInterval(function () {
+    buttonBox.innerHTML = TEMPLATE;
+}, 300);
+
+function choose(state) {
+    clearInterval(rerender);
+    document.getElementById('dlg').style.display = 'none';
+    document.getElementById('result').textContent = 'You ' + state;
+}
+</script>
+</body>
+</html>

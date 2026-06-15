@@ -31,12 +31,24 @@ class FirefoxBackend:
         self.profile_name = profile_name
         self.temp_profile_path = None  # Track temp profile for cleanup
         self.current_content_filter = default_content_filter  # Active filter state (starts with CLI arg)
+        # When a login-shaped form (password field) was last submitted.
+        # Some MFA heuristics (Facebook's push-approval "back on the login
+        # page" state) are only valid after an actual login attempt.
+        self.login_submitted_at = 0
+        # Accumulated infinite-scroll feed posts, keyed by page URL:
+        # {url: {'seen': set(text-hash), 'posts': [{key, html, text}], 'exhausted': bool}}
+        # Persists across requests so "Load more posts" can extend the feed.
+        self.feed_state = {}
         self.setup_firefox()
 
         # Register cleanup handler for private mode
         if self.use_private_profile:
             import atexit
             atexit.register(self._cleanup_temp_profile)
+
+    # Feed harvesting batch sizes (posts added per initial load / per Load more)
+    FEED_INITIAL_BATCH = 8
+    FEED_LOADMORE_BATCH = 8
 
     def _clear_profile_pref(self, profile_path, pref_name):
         """Remove a preference from the profile's prefs.js and user.js before Firefox starts.
@@ -190,54 +202,80 @@ class FirefoxBackend:
                 logger.error(f"Failed to start Firefox: {e}")
                 sys.exit(1)
 
-    def wait_for_interactive_elements_stable(self, max_wait=3, check_interval=0.5):
-        """
-        Wait for interactive elements to stabilize on the page
-        Probes for button/form stability rather than guessing with fixed delays
+    # Settle profiles: (quiet_ms, max_wait_s).
+    #
+    # Initial loads use a longer quiet window so late-arriving content (cookie
+    # banners, newsletter modals injected ~1s after load) is included in the
+    # snapshot. In-page actions (modal clicks, filter changes) settle faster.
+    # The cap bounds pages that never go quiet (animations, tickers).
+    SETTLE_INITIAL = (1250, 4.0)
+    SETTLE_ACTION = (600, 3.0)
+
+    def wait_for_page_settle(self, quiet_ms=SETTLE_INITIAL[0], max_wait=SETTLE_INITIAL[1]):
+        """Wait until the page has stopped changing, then return.
+
+        This is THE sampling rule: every content snapshot (initial load, after
+        a modal click, after a form submission) waits for the same condition —
+        document.readyState complete, then no DOM mutations for `quiet_ms`
+        milliseconds (capped at `max_wait` seconds total).
+
+        A MutationObserver timestamps the last mutation; unlike the previous
+        element-count polling, content that appears late or changes in place
+        (same number of buttons, different dialog) resets the quiet timer.
+
+        Known limitation: content
+        scheduled by a timer that fires after more than `quiet_ms` of total
+        silence is still missed. Real consent platforms load over the network
+        and produce mutation chatter that keeps the timer armed, so this is
+        rare in practice.
         """
         try:
-            check_js = """
-            // Count interactive elements that could become buttons
-            const buttons = document.querySelectorAll('button, input[type="submit"], [role="button"], a[role="button"]');
-            const forms = document.querySelectorAll('form');
-            const clickableElements = document.querySelectorAll('[onclick], [data-testid*="button"]');
+            WebDriverWait(self.driver, 3).until(
+                lambda driver: driver.execute_script("return document.readyState") == "complete"
+            )
+        except TimeoutException:
+            pass
 
-            return {
-                buttons: buttons.length,
-                forms: forms.length,
-                clickable: clickableElements.length,
-                total: buttons.length + forms.length + clickableElements.length
-            };
-            """
+        # Idempotent: first call after a navigation installs the observer and
+        # reports 0ms quiet; later calls just report time since last mutation.
+        # Always returns a finite number — during an in-flight navigation the
+        # subtraction could be NaN (which Selenium maps to Python None), so we
+        # coerce to 0 ("just changed, not settled") here.
+        settle_js = """
+        if (!window.__firelynxLastMutation) {
+            window.__firelynxLastMutation = performance.now();
+            try {
+                new MutationObserver(function () {
+                    window.__firelynxLastMutation = performance.now();
+                }).observe(document.documentElement, {
+                    childList: true, subtree: true,
+                    attributes: true, characterData: true
+                });
+            } catch (e) {}
+        }
+        var quiet = performance.now() - window.__firelynxLastMutation;
+        return (typeof quiet === 'number' && isFinite(quiet)) ? quiet : 0;
+        """
 
-            previous_count = None
-            stable_checks = 0
-            start_time = time.time()
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            try:
+                quiet_for = self.driver.execute_script(settle_js)
+            except Exception as e:
+                logger.debug(f"Page settle check failed: {e}")
+                return
+            # Defensive: execute_script can still return None mid-navigation
+            # (document being replaced); treat as not-yet-settled and keep waiting
+            if quiet_for is None:
+                time.sleep(0.2)
+                continue
+            if quiet_for >= quiet_ms:
+                logger.debug(f"🔍 Page settled (quiet for {quiet_for:.0f}ms)")
+                return
+            # Sleep just long enough to plausibly reach the quiet threshold
+            time.sleep(min(max(quiet_ms - quiet_for, 100), 500) / 1000)
 
-            while time.time() - start_time < max_wait:
-                try:
-                    current_counts = self.driver.execute_script(check_js)
-                    current_total = current_counts['total']
-
-                    if previous_count is not None and current_total == previous_count:
-                        stable_checks += 1
-                        if stable_checks >= 2:  # Stable for 2 consecutive checks
-                            logger.debug(f"🔍 Interactive elements stable: {current_counts}")
-                            return
-                    else:
-                        stable_checks = 0
-
-                    previous_count = current_total
-                    time.sleep(check_interval)
-
-                except Exception as e:
-                    logger.debug(f"Element stability check failed: {e}")
-                    break
-
-            logger.debug("Interactive elements stability check timed out")
-
-        except Exception as e:
-            logger.debug(f"Interactive elements stability check error: {e}")
+        logger.debug(f"Page settle wait capped at {max_wait}s (page never went quiet)")
 
     def install_stealth_extension(self):
         """Install the stealth content script extension to hide WebDriver markers.
@@ -305,14 +343,9 @@ class FirefoxBackend:
             self.driver.get(url)
             self.hide_webdriver_traces()
 
-            try:
-                WebDriverWait(self.driver, 3).until(
-                    lambda driver: driver.execute_script("return document.readyState") == "complete"
-                )
-                # Probe for stable interactive content
-                self.wait_for_interactive_elements_stable()
-            except TimeoutException:
-                pass
+            # Wait for the page to settle so late-arriving content (banners,
+            # modals) is part of the snapshot we extract
+            self.wait_for_page_settle()
 
             # Extract content and enrich with SSL info and modal conversion
             page_data = self.extract_page_data()
@@ -335,12 +368,6 @@ class FirefoxBackend:
 
             if extraction_info.get('hasStructuredData'):
                 logger.debug("📋 Enhanced with structured data (JSON-LD/microdata)")
-
-            # Special logging for combined extraction to understand what sections were found
-            if method == 'combined_extraction':
-                sections = page_data.get('sections', {})
-                if sections:
-                    logger.debug(f"🔗 Combined extraction - Interactive: {sections.get('interactive', {})}, Main: {sections.get('mainContent', {})}")
 
             # Import content processor for HTML generation
             from src.content_processor import ContentProcessor
@@ -418,6 +445,148 @@ class FirefoxBackend:
                 'error': f'SSL info unavailable: {str(e)}'
             }
 
+    def is_feed_page(self):
+        """Detect an infinite-scroll feed (generic: [role=feed] or many articles)."""
+        try:
+            js = load_js_file('feed-harvest.js') + "\nreturn detectFeed();"
+            return self.driver.execute_script(js) or {'isFeed': False}
+        except Exception as e:
+            logger.debug(f"Feed detection failed: {e}")
+            return {'isFeed': False}
+
+    def harvest_feed(self, seen_keys, max_new, max_scrolls=15):
+        """Scroll the live feed and harvest new posts until max_new collected,
+        the end is reached, or the scroll budget runs out.
+
+        Posts are de-duped against seen_keys (a set, mutated in place) so the
+        DOM recycling that virtualized feeds do doesn't produce duplicates.
+        Returns (new_posts, reached_end).
+        """
+        harvest_js = load_js_file('feed-harvest.js')
+        new_posts = []
+        no_new_streak = 0
+        reached_end = False
+
+        for _ in range(max_scrolls):
+            try:
+                articles = self.driver.execute_script(
+                    harvest_js + "\nreturn harvestVisibleArticles();") or []
+            except Exception as e:
+                logger.debug(f"Article harvest failed: {e}")
+                break
+
+            added = 0
+            for art in articles:
+                key = art.get('key')
+                if key and key not in seen_keys:
+                    seen_keys.add(key)
+                    new_posts.append(art)
+                    added += 1
+
+            if len(new_posts) >= max_new:
+                break
+
+            if added == 0:
+                no_new_streak += 1
+                if no_new_streak >= 3:  # nothing new after several scrolls = end
+                    reached_end = True
+                    break
+            else:
+                no_new_streak = 0
+
+            try:
+                scroll = self.driver.execute_script(
+                    harvest_js + "\nreturn scrollFeedStep();") or {}
+            except Exception as e:
+                logger.debug(f"Feed scroll failed: {e}")
+                break
+            self.wait_for_page_settle(*self.SETTLE_ACTION)
+            if scroll.get('atBottom') and added == 0:
+                reached_end = True
+                break
+
+        logger.info(f"📜 Harvested {len(new_posts)} new feed post(s) "
+                    f"(reached_end={reached_end})")
+        return new_posts, reached_end
+
+    def extract_feed_page(self):
+        """Build page data for an infinite-scroll feed from accumulated posts.
+
+        On first view of a URL, harvests the initial batch. Always renders from
+        the accumulated feed_state, so a "Load more" that appended posts (or a
+        redirect back to this URL) shows everything collected so far. Each post
+        is anchored (<a name="fxpost-N">) so "Load more" can focus the first new
+        post; a trailing [Load more posts] link (or an end-of-feed note) drives
+        pagination.
+        """
+        url = self.driver.current_url
+        # A fresh page load re-harvests from the top — the feed content is
+        # current, and stale accumulation from a previous visit shouldn't show.
+        # Accumulation across "Load more" happens in handle_load_more, which
+        # extends the live scrolled feed WITHOUT reloading.
+        state = {'seen': set(), 'posts': [], 'exhausted': False}
+        self.feed_state[url] = state
+        new_posts, end = self.harvest_feed(state['seen'], self.FEED_INITIAL_BATCH)
+        state['posts'].extend(new_posts)
+        state['exhausted'] = end
+
+        return self.render_feed_state(url)
+
+    def render_feed_state(self, url):
+        """Render accumulated feed posts (with anchors + Load-more) into page_data."""
+        from src import proxy_server
+        proxy_base = proxy_server.PROXY_BASE_URL
+        from urllib.parse import quote
+
+        state = self.feed_state.get(url, {'posts': [], 'exhausted': True})
+        posts = state['posts']
+
+        html_parts, text_parts = [], []
+        for i, post in enumerate(posts):
+            html_parts.append(
+                f'<a name="fxpost-{i}" id="fxpost-{i}"></a>\n'
+                f'<div class="feed-post">{post.get("html", "")}</div>')
+            text_parts.append(post.get('text', ''))
+
+        if state.get('exhausted'):
+            html_parts.append('<a name="fxend"></a><p><em>(end of feed)</em></p>')
+        else:
+            html_parts.append(
+                '<a name="fxmore"></a>'
+                f'<p><a href="{proxy_base}/load-more?url={quote(url)}">'
+                '[Load more posts]</a></p>')
+
+        page_data = {
+            'title': self.driver.title or 'Feed',
+            'url': url,
+            'content': '\n\n'.join(text_parts),
+            'htmlContent': '\n<hr>\n'.join(html_parts),
+            'links': [],
+            'extraction': {
+                'method': 'feed_harvest',
+                'confidence': 0.9,
+                'source': 'Infinite-scroll feed harvest',
+                'contentLength': sum(len(t) for t in text_parts),
+                'postCount': len(posts),
+            },
+        }
+
+        # Capture header controls (compose/Like/etc.) and dialogs as on any page
+        try:
+            modal_js = load_js_file('modal-detection.js')
+            detected = self.driver.execute_script(modal_js + """
+                return {
+                    modalElements: detectModalElements(),
+                    pageControls: tagActivatablePageControls()
+                };
+            """)
+            page_data['modalElements'] = detected.get('modalElements', {})
+            page_data['pageControls'] = detected.get('pageControls', [])
+        except Exception as e:
+            logger.debug(f"Control detection on feed page failed: {e}")
+
+        return self.enrich_page_data(page_data)
+
     def extract_page_data(self):
         """
         Extract page data using hybrid content extraction strategy.
@@ -433,13 +602,40 @@ class FirefoxBackend:
         accuracy across diverse web content while maintaining real-time performance.
         """
         try:
-            # First, try Python-side DOM processing for form pages
+            # Infinite-scroll feeds get scroll-harvest pagination instead of a
+            # single snapshot (which would show only the handful of posts the
+            # virtualized DOM holds). Checked first — a logged-in feed otherwise
+            # falls through to the form-page or hybrid path.
+            feed = self.is_feed_page()
+            if feed.get('isFeed'):
+                logger.info(f"📜 Feed detected ({feed.get('articleCount')} articles) "
+                            f"— using scroll-harvest pagination")
+                return self.extract_feed_page()
+
+            # Next, try Python-side DOM processing for form pages
             raw_dom = self.extract_raw_dom()
             if raw_dom:
                 python_result = self.process_dom_python_side(raw_dom)
                 if python_result:
                     logger.info("✅ Using Python-side DOM extraction for form page")
-                    return python_result
+                    # Form pages get the same dialog detection, page-control
+                    # capture, and shared enrichment (SSL info, assistive
+                    # semantics, modal conversion) as every other page — login
+                    # pages and app shells (the logged-in feed classifies as a
+                    # form page) are exactly where dialogs and JS controls live
+                    try:
+                        modal_js = load_js_file('modal-detection.js')
+                        detected = self.driver.execute_script(modal_js + """
+                            return {
+                                modalElements: detectModalElements(),
+                                pageControls: tagActivatablePageControls()
+                            };
+                        """)
+                        python_result['modalElements'] = detected.get('modalElements', {})
+                        python_result['pageControls'] = detected.get('pageControls', [])
+                    except Exception as e:
+                        logger.debug(f"Control detection on form page failed: {e}")
+                    return self.enrich_page_data(python_result)
 
             # Fall back to JavaScript extraction for non-form pages
             # Use shared extraction method for consistency
@@ -483,6 +679,12 @@ class FirefoxBackend:
         ssl_info = self.get_ssl_info()
         page_data['ssl_info'] = ssl_info
 
+        # Apply the page's assistive-technology semantics to the final HTML
+        # (drop aria-hidden/inert leftovers, label text-less links) BEFORE
+        # modal conversion so the injected modal interface is never touched
+        from src.content_processor import apply_assistive_semantics
+        page_data = apply_assistive_semantics(page_data)
+
         # Check for modal elements and convert them
         modal_elements = page_data.get('modalElements', {})
         total_modal_elements = modal_elements.get('totalElements', 0)
@@ -502,6 +704,16 @@ class FirefoxBackend:
         callers holding a FirefoxBackend reference can run MFA detection directly.
         """
         return FormProcessor(self).is_mfa_challenge_page(page_data)
+
+    def submit_form(self, url, post_data, headers):
+        """Submit a form via Firefox.
+
+        Thin delegate to FormProcessor (which owns form filling/submission).
+        The proxy handler holds a FirefoxBackend reference and submits through
+        it, so this delegate must exist — without it every form POST (login,
+        search) raises AttributeError in the background submit thread.
+        """
+        return FormProcessor(self).submit_form(url, post_data, headers)
 
     def extract_content_from_current_page(self):
         """Shared content extraction logic for both new page loads and filter changes
@@ -594,10 +806,12 @@ class FirefoxBackend:
                 const forms = Array.from(document.querySelectorAll('form'));
                 const inputs = Array.from(document.querySelectorAll('input, textarea, select'));
 
+                const mainEl = document.querySelector('[role="main"], main, [role="feed"]');
                 return {
                     formCount: forms.length,
                     inputCount: inputs.length,
                     visibleTextLength: (document.body.innerText || '').trim().length,
+                    mainContentLength: mainEl ? (mainEl.innerText || '').trim().length : 0,
                     forms: forms.map(form => ({
                         action: form.action || '',
                         method: form.method || 'GET',
@@ -648,16 +862,25 @@ class FirefoxBackend:
         # Use visible text length (innerText) rather than HTML source size — search pages
         # like Google have huge HTML but almost no visible text, while a news site with a
         # search box in the header has thousands of visible characters of article content.
+        #
+        # Critically, a page with a substantial main/feed landmark is NOT
+        # form-centric even when total visible text is briefly low (a logged-in
+        # app shell before the feed fully streams in, e.g. Facebook): raw-dumping
+        # it buries the feed under nav and notification flyouts. Such pages go
+        # through the landmark/hybrid pipeline instead. A password field always
+        # forces the form path so logins stay preserved.
         visible_text_length = form_data.get('visibleTextLength', 999999)
-        is_form_page = (
+        has_password = any('password' in inp.get('type', '').lower()
+                           for inp in form_data['allInputs'])
+        has_substantial_main = form_data.get('mainContentLength', 0) > 200
+        is_form_page = has_password or (
+            not has_substantial_main and
             form_data['formCount'] > 0 and
             visible_text_length < 2000  # Short visible content = form is the main feature
-        ) or (
-            form_data['inputCount'] >= 2 and
-            any('password' in inp.get('type', '').lower() for inp in form_data['allInputs'])
         )
 
-        logger.debug(f"🔧 Form page detected: {is_form_page}")
+        logger.debug(f"🔧 Form page detected: {is_form_page} "
+                     f"(password={has_password}, main_len={form_data.get('mainContentLength', 0)})")
 
         if is_form_page:
             # For form pages, preserve the original HTML structure with forms
@@ -668,18 +891,35 @@ class FirefoxBackend:
             from src import proxy_server
             PROXY_BASE_URL = proxy_server.PROXY_BASE_URL
 
-            # Fix relative form action URLs to submit through proxy
+            # Route every form's submission through the proxy so the real
+            # target reaches us reliably.
+            #
+            # The action is first resolved to an ABSOLUTE URL with urljoin,
+            # which handles empty, relative, root-relative, protocol-relative,
+            # and already-absolute actions uniformly. Facebook's login form has
+            # an EMPTY action; without this it resolved to a host-less path and
+            # the proxy produced the invalid "https://".
+            #
+            # POST forms are then pointed at the proxy's plain-HTTP
+            # /form-submit endpoint with the absolute target in the query.
+            # This deliberately avoids making lynx perform an HTTPS POST
+            # (which goes through ProxySSL's CONNECT path, triggers a cert
+            # prompt, and gets mis-routed to localhost). GET forms keep their
+            # absolute action and submit like ordinary navigation. Non-HTTP
+            # schemes (javascript:, mailto:) are left untouched.
             base_url = url
             for form in soup.find_all('form'):
-                if form.get('action'):
-                    action = form['action']
-                    if not action.startswith(('http://', 'https://', '/', '//')):
-                        # Convert relative URL to absolute for the target
-                        absolute_action = urljoin(base_url, action)
-                        # But make the form submit to our proxy with the target URL encoded
-                        proxy_action = f"{PROXY_BASE_URL}/form-submit?target={quote(absolute_action)}"
-                        form['action'] = proxy_action
-                        logger.debug(f"🔧 Fixed form action: '{action}' -> '{proxy_action}' (will forward to {absolute_action})")
+                absolute_action = urljoin(base_url, form.get('action') or '')
+                if not absolute_action.startswith(('http://', 'https://')):
+                    continue
+                method = (form.get('method') or 'get').lower()
+                if method == 'post':
+                    proxy_action = f"{PROXY_BASE_URL}/form-submit?target={quote(absolute_action)}"
+                    logger.debug(f"🔧 Form POST action {form.get('action')!r} -> {proxy_action!r}")
+                    form['action'] = proxy_action
+                elif form.get('action') != absolute_action:
+                    logger.debug(f"🔧 Form GET action {form.get('action')!r} -> {absolute_action!r}")
+                    form['action'] = absolute_action
 
             # Extract meaningful content while preserving forms
             content_text = soup.get_text(separator=' ', strip=True)

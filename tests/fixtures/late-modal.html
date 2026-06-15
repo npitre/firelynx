@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Example Magazine</title>
+</head>
+<body>
+<h1>Example Magazine</h1>
+<p>Long-form reporting on science, culture, and technology. This month we
+follow a research vessel mapping the mid-Atlantic ridge, profile the last
+neon sign makers of the city, and review three new books on the history of
+cartography.</p>
+<p><a href="/issues">Past issues</a> | <a href="/subscribe">Subscribe</a></p>
+<p id="result"></p>
+
+<script>
+// Newsletter-style modal that appears ~1 second after page load — the
+// generic "late modal" pattern (consent platforms, signup prompts) that
+// one-shot detection at document-ready misses. Note: the settle loop's
+// quiet window must exceed this delay; content that appears after a
+// longer total silence is a known limitation of the settle-and-re-extract wait.
+setTimeout(function () {
+    var dlg = document.createElement('div');
+    dlg.id = 'newsletter-dlg';
+    dlg.setAttribute('role', 'dialog');
+    dlg.setAttribute('aria-modal', 'true');
+    dlg.setAttribute('aria-label', 'Newsletter signup');
+    dlg.style.cssText = 'position: fixed; top: 20%; left: 20%; right: 20%;' +
+        'background: #fff; border: 2px solid #333; padding: 24px; z-index: 1000;';
+    dlg.innerHTML =
+        '<h2>Enjoying the magazine?</h2>' +
+        '<p>Get one free story in your inbox every Sunday morning.</p>' +
+        '<button onclick="dismiss(\'subscribed\')">Subscribe</button>' +
+        '<button onclick="dismiss(\'dismissed\')">No thanks</button>';
+    document.body.appendChild(dlg);
+}, 1000);
+
+function dismiss(state) {
+    document.getElementById('newsletter-dlg').style.display = 'none';
+    document.getElementById('result').textContent = 'Newsletter ' + state;
+}
+</script>
+</body>
+</html>

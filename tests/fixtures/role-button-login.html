@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign in — Example Network</title>
+</head>
+<body>
+<!-- A common JS-app form pattern: a hidden UNLABELED real submit input
+     (so Enter submits), and a styled div[role=button] carrying the visible
+     label. In lynx the div is dead text and the bare input renders as a
+     confusing "Submit". -->
+<h1>Example Network</h1>
+<p>Sign in to see updates from people you know.</p>
+<form action="login" method="post">
+  <p>
+    <label for="email">Email address</label>
+    <input type="text" name="email" id="email">
+  </p>
+  <p>
+    <label for="pass">Password</label>
+    <input type="password" name="pass" id="pass">
+  </p>
+  <input type="submit" style="position: absolute; left: -9999px; opacity: 0;">
+  <div role="button" tabindex="0" aria-label="Sign In"
+       style="background: #1877f2; color: #fff; padding: 10px 20px; border-radius: 6px; display: inline-block;">
+    Sign in
+  </div>
+</form>
+<p><a href="/recover">Forgotten password?</a></p>
+</body>
+</html>

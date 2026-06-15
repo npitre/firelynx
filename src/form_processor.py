@@ -66,6 +66,10 @@ class FormProcessor:
         try:
             # Analyze the live Firefox DOM for MFA indicators
             mfa_analysis_js = """
+            // True when a login form was submitted recently in this session -
+            // gates heuristics that are only valid mid-login-flow
+            const recentLoginSubmission = arguments[0];
+
             // Comprehensive MFA detection using actual DOM state
             const mfaAnalysis = {
                 hasMfaFields: false,
@@ -74,19 +78,69 @@ class FormProcessor:
                 indicators: []
             };
 
-            // 1. Check for MFA-specific form fields (be specific to avoid CSRF/session tokens)
+            // Is an element actually presented to the user? Catches the common
+            // ways a control is hidden: display/visibility/opacity, zero size,
+            // aria-hidden/hidden, and offscreen positioning. Facebook keeps a
+            // HIDDEN input[autocomplete="one-time-code"] (WebOTP autofill) on
+            // logged-in pages — it must not count as a credential challenge.
+            function fxVisible(el) {
+                if (!el) return false;
+                if (el.closest('[aria-hidden="true"], [hidden]')) return false;
+                const s = getComputedStyle(el);
+                if (s.display === 'none' || s.visibility === 'hidden' ||
+                    parseFloat(s.opacity || '1') === 0) return false;
+                const r = el.getBoundingClientRect();
+                if (r.width < 2 || r.height < 2) return false;          // zero-size
+                const vw = window.innerWidth || 1366, vh = window.innerHeight || 768;
+                if (r.bottom < 0 || r.right < 0 || r.left > vw || r.top > vh * 3) {
+                    return false;                                       // offscreen
+                }
+                return true;
+            }
+
+            // 0. Authenticated-session override (language-agnostic).
+            // If the page shows app chrome you only get AFTER signing in
+            // (messages/notifications/friends/logout links) AND has no
+            // credential-entry field, it is not an auth challenge — regardless
+            // of any stray "code"-named input or security text elsewhere on
+            // the page. This replaces the old English-only success-text check
+            // ("what is on your mind"), which never matched localized UIs and
+            // let logged-in pages trip a false MFA prompt. Skipped while a
+            // login was just submitted, so the push-pending flow still runs.
+            const hasAuthChrome = !!document.querySelector(
+                'a[href*="logout"], a[href*="/messages/"], a[href*="/notifications"], a[href*="/friends/"]');
+            // A REAL, VISIBLE credential field — not any input whose name
+            // happens to contain "code" (promo/country/CSRF), and not a hidden
+            // autofill helper, both of which tripped the false positive
+            const hasCredentialField = Array.from(document.querySelectorAll(
+                'input[type="password"], input[name="pass"], ' +
+                'input[autocomplete="one-time-code"], input[name*="otp"]')).some(fxVisible);
+            if (hasAuthChrome && !hasCredentialField && !recentLoginSubmission) {
+                mfaAnalysis.mfaType = 'authenticated';
+                mfaAnalysis.indicators.push('Authenticated app chrome present, no credential field');
+                return mfaAnalysis;  // stays hasMfaFields=false → not an MFA challenge
+            }
+
+            // 1. Check for MFA-specific form fields. Specific OTP patterns only —
+            // a bare name*="code" also matches promo/country/CSRF fields and was
+            // a source of false positives.
             const mfaFieldSelectors = [
-                'input[name*="code"]', 'input[name*="otp"]',
-                'input[name*="mfa_token"]', 'input[name*="auth_token"]', 'input[name*="verification_token"]',
-                'input[name*="approvals"]', 'input[name*="verification"]',
-                'input[id*="code"]', 'input[id*="otp"]'
+                'input[autocomplete="one-time-code"]',
+                'input[name*="otp"]', 'input[id*="otp"]',
+                'input[name*="mfa"]', 'input[name*="2fa"]',
+                'input[name*="approvals_code"]',
+                'input[name="verification_code"]', 'input[name="security_code"]',
+                'input[name="code"]'
             ];
 
             for (const selector of mfaFieldSelectors) {
-                if (document.querySelector(selector)) {
+                // Only a VISIBLE code field is an actual challenge — a hidden
+                // autofill/WebOTP input does not count
+                const visibleField = Array.from(document.querySelectorAll(selector)).find(fxVisible);
+                if (visibleField) {
                     mfaAnalysis.hasMfaFields = true;
                     mfaAnalysis.mfaType = 'code_entry';
-                    mfaAnalysis.indicators.push('MFA input: ' + selector);
+                    mfaAnalysis.indicators.push('Visible MFA input: ' + selector);
                     break;
                 }
             }
@@ -144,11 +198,13 @@ class FormProcessor:
                                    bodyText.includes('log in to facebook') ||
                                    window.location.pathname.includes('/login');
 
-                if (isLoginPage && (passwordInput || emailInput)) {
+                // Only meaningful AFTER a login attempt: a fresh visit to the
+                // login page is just a login page, not a pending approval
+                if (isLoginPage && (passwordInput || emailInput) && recentLoginSubmission) {
                     // We're back on login page - could be waiting for push approval
                     mfaAnalysis.hasWaitingState = true;
                     mfaAnalysis.mfaType = 'facebook_push_pending';
-                    mfaAnalysis.indicators.push('Back on login page - likely waiting for push approval');
+                    mfaAnalysis.indicators.push('Back on login page after submission - likely waiting for push approval');
                 }
             }
 
@@ -171,18 +227,20 @@ class FormProcessor:
             return mfaAnalysis;
             """
 
-            # Execute the DOM analysis in Firefox
-            dom_result = self.driver.execute_script(mfa_analysis_js)
+            # Execute the DOM analysis in Firefox. A login submission stays
+            # "recent" for 10 minutes - enough for any push-approval flow.
+            recent_login = (time.time() - getattr(self.firefox_backend, 'login_submitted_at', 0)) < 600
+            dom_result = self.driver.execute_script(mfa_analysis_js, recent_login)
 
             # Use only DOM analysis - JavaScript patterns too prone to false positives
             if dom_result and (dom_result.get('hasMfaFields') or dom_result.get('hasWaitingState')):
                 mfa_type = dom_result.get('mfaType', 'unknown')
                 indicators = dom_result.get('indicators', [])
-                logger.debug(f"🔐 DOM analysis - Type={mfa_type}")
+                # INFO level so a --verbose run reveals exactly which signal
+                # fired (essential for diagnosing false positives in the wild)
+                logger.info(f"🔐 MFA DETECTED via DOM analysis - Type={mfa_type}")
                 for indicator in indicators:
-                    logger.debug(f"  - {indicator}")
-
-                logger.info(f"🔐 MFA DETECTED via: DOM analysis")
+                    logger.info(f"  - {indicator}")
                 return True
 
         except Exception as e:
@@ -221,6 +279,13 @@ class FormProcessor:
 
             # Parse form data
             form_data = parse_qs(post_data_str)
+
+            # Remember login-shaped submissions: the Facebook push-approval
+            # detection ("back on the login page = waiting for approval") is
+            # only meaningful after one
+            if any('pass' in field_name.lower() for field_name in form_data):
+                self.firefox_backend.login_submitted_at = time.time()
+                logger.debug("🔐 Login-shaped submission recorded (password field present)")
 
             # Try to find and fill the form
             form_filled = False
@@ -284,21 +349,25 @@ class FormProcessor:
                 # Fallback: just navigate to the URL
                 pass
 
-            # Quick check if page has started loading, don't wait long
-            try:
-                # Just a brief moment to see if page starts changing
-                time.sleep(1)
-                logger.info("Getting page response quickly to avoid lynx timeout")
-            except Exception:
-                pass
+            # Wait for the submission result to settle (navigation, MFA UI,
+            # validation errors appearing in place) before extracting
+            self.firefox_backend.wait_for_page_settle()
 
             # Extract the result page
             return self.firefox_backend.extract_page_data()
 
         except Exception as e:
             logger.error(f"Form submission error: {e}")
-            # Fallback to regular page fetch
-            return self.firefox_backend.fetch_page(url)
+            # Return a page-data DICT (callers render this, not raw HTML bytes);
+            # fetch_page() returns bytes and would corrupt the result pipeline
+            safe_url = url if str(url).startswith(('http://', 'https://')) else ''
+            return {
+                'title': 'Form Submission Error',
+                'content': f'Form submission failed: {e}',
+                'htmlContent': '',
+                'url': safe_url,
+                'links': [],
+            }
 
     def convert_modal_elements_to_forms(self, page_data):
         """
@@ -324,55 +393,77 @@ class FormProcessor:
             for i, button in enumerate(buttons):
                 logger.info(f"🔧 Button {i+1}: text='{button.get('text', 'NO_TEXT')}', action='{button.get('action', 'NO_ACTION')}', elementId='{button.get('elementId', 'NO_ID')}'")
 
-            for i, modal in enumerate(modals):
-                logger.info(f"🔧 Modal {i+1}: buttonCount={modal.get('buttonCount', 0)}, elementId='{modal.get('elementId', 'NO_ID')}')")
-
-            if not buttons and not modals:
+            if not buttons:
                 return page_data
 
             # Get proxy base URL
             PROXY_BASE_URL = self.get_proxy_base_url()
 
-            # Generate modal interface HTML - use single form with multiple buttons like filter buttons
-            modal_html = '''
-            <div style="border: 2px solid blue; padding: 15px; margin: 10px; background: #f0f8ff;">
-                <h3>🔵 INTERACTIVE ELEMENTS DETECTED</h3>
-                <p>This page has buttons or dialogs that need interaction:</p>
-                <strong>Actions:</strong> '''
+            button_style = ('padding: 8px 16px; font-size: 14px; background: #4267B2; '
+                            'color: white; border: none; margin-right: 4px;')
 
-            # Create single form with all buttons
-            if buttons or modals:
-                modal_html += f'<form method="post" action="{PROXY_BASE_URL}/modal-action" style="display: inline; margin: 0;">'
-
-                # Add buttons to single form - encode action and element_id in button name
-                for button in buttons:
+            def render_buttons(dialog_buttons):
+                """One submit input per button; name encodes action|element_id,
+                the [Label] value carries the accessible name used for click
+                re-resolution."""
+                parts = []
+                for button in dialog_buttons:
                     element_id = button.get('elementId', '')
                     text = button.get('text', 'Button')
                     action = button.get('action', 'click_button')
-
-                    # Encode button info in the submit button name: action|element_id
                     button_name = f"{action}|{element_id}"
-                    modal_html += f'<input type="submit" name="{html.escape(button_name)}" value="[{html.escape(text)}]" style="padding: 8px 16px; font-size: 14px; background: #4267B2; color: white; border: none; margin-right: 4px;">'
-                    logger.info(f"🔧 Generated button for '{text}': [button value='[{text}]']")
+                    parts.append(f'<input type="submit" name="{html.escape(button_name)}" '
+                                 f'value="[{html.escape(text)}]" style="{button_style}">')
+                return ''.join(parts)
 
-                # Add modal dialogs to single form
-                for modal in modals:
-                    element_id = modal.get('elementId', '')
-                    button_count = modal.get('buttonCount', 0)
+            buttons_by_dialog = {}
+            for button in buttons:
+                buttons_by_dialog.setdefault(button.get('dialogId', ''), []).append(button)
 
-                    button_name = f"click_dialog|{element_id}"
-                    modal_html += f'<input type="submit" name="{html.escape(button_name)}" value="Open Dialog ({button_count} options)" style="padding: 8px 16px; font-size: 14px; background: #2E8B57; color: white; border: none; margin-right: 4px;">'
+            # One form, one section per dialog: its name (when the page labels
+            # it), its text, then its buttons. This is THE place a detected
+            # dialog is presented — extraction excludes dialog content from
+            # the page body so nothing appears twice.
+            modal_html = (
+                '<div style="border: 2px solid blue; padding: 15px; margin: 10px; background: #f0f8ff;">\n'
+                '<h3>🔵 INTERACTIVE ELEMENTS DETECTED</h3>\n'
+                f'<form method="post" action="{PROXY_BASE_URL}/modal-action" style="margin: 0;">'
+            )
 
-                modal_html += '</form><br>'
+            rendered_dialogs = set()
+            for modal in modals:
+                dialog_id = modal.get('elementId', '')
+                dialog_buttons = buttons_by_dialog.get(dialog_id)
+                if not dialog_buttons:
+                    continue
+                rendered_dialogs.add(dialog_id)
+                name = (modal.get('name') or '').strip()
+                text = (modal.get('text') or '').strip()
+                # Dialogs often start with their own visible title; don't
+                # repeat it when it equals the explicit label
+                if name and text.startswith(name):
+                    text = text[len(name):].strip()
+                if name:
+                    modal_html += f'<h4>{html.escape(name)}</h4>'
+                if text:
+                    modal_html += f'<p>{html.escape(text)}</p>'
+                modal_html += '<p>' + render_buttons(dialog_buttons) + '</p>'
 
-            modal_html += '''
-                <p><em>Click the buttons above to interact with the page elements.</em></p>
-            </div>
-            '''
+            # Defensive: buttons whose dialog entry is missing still get shown
+            orphan_buttons = [button
+                              for dialog_id, dialog_buttons in buttons_by_dialog.items()
+                              if dialog_id not in rendered_dialogs
+                              for button in dialog_buttons]
+            if orphan_buttons:
+                modal_html += '<p>' + render_buttons(orphan_buttons) + '</p>'
+
+            modal_html += '</form>\n</div>\n'
 
             # Inject the modal interface at the beginning of both content and htmlContent
             current_content = page_data.get('content', '')
-            current_html_content = page_data.get('htmlContent', '')
+            # Dialog markup embedded inside content sections would render the
+            # dialog's text a second time - the interface above is canonical
+            current_html_content = self._remove_dialog_markup(page_data.get('htmlContent', ''))
 
             page_data['content'] = modal_html + '\n\n<hr>\n\n' + current_content
 
@@ -396,6 +487,34 @@ class FormProcessor:
         except Exception as e:
             logger.warning(f"Modal conversion failed: {e}")
             return page_data
+
+    def _remove_dialog_markup(self, html_content):
+        """Remove dialog markup embedded in extracted page HTML.
+
+        A detected dialog is presented once, by the converted interface that
+        convert_modal_elements_to_forms() injects. Copies of the dialog's
+        markup can still sit inside content sections whose source element
+        contained the dialog (e.g. a main landmark wrapping it) — and lynx
+        ignores CSS, so even display:none dialog markup would render as
+        visible text. Strip it all.
+        """
+        if not html_content:
+            return html_content
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_content, 'html.parser')
+            removed = 0
+            for element in soup.select(
+                    'dialog, [role="dialog"], [role="alertdialog"], '
+                    '[aria-modal="true"], [data-modal-id]'):
+                element.decompose()
+                removed += 1
+            if removed:
+                logger.debug(f"🔧 Removed {removed} embedded dialog markup copies from content")
+                return str(soup)
+        except Exception as e:
+            logger.debug(f"Dialog markup removal failed: {e}")
+        return html_content
 
     def filter_sensitive_data(self, post_data_str):
         """Filter sensitive information from POST data for logging"""
