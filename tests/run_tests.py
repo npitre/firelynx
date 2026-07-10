@@ -126,6 +126,46 @@ class TestSubmitTimeValidation(FixtureTest):
         self.assertNotIn('VALIDATION-ERROR', result)
 
 
+class TestJsSubmitForm(FixtureTest):
+    """Pattern: single-page-app login (Vue/React) — unnamed fields, no form
+    action, submit is a <button type=button> JS handler, plus a label-less icon
+    toggle. lynx must get a pressable submit, and the typed values must reach
+    the JS handler."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.html = cls.harness.fetch_fixture('js-submit-form.html')
+
+    def test_js_button_becomes_pressable_submit(self):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(self.html, 'html.parser')
+        submits = [inp for inp in soup.find_all('input', attrs={'type': 'submit'})]
+        values = [inp.get('value') for inp in submits]
+        self.assertIn('Log in', values)
+        # The label-less password toggle must NOT have become a submit control
+        self.assertNotIn('', [v for v in values if v is not None])
+        self.assertNotIn(None, values)
+
+    def test_unnamed_fields_get_synthetic_names(self):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(self.html, 'html.parser')
+        form = next(f for f in soup.find_all('form') if f.find('input', attrs={'type': 'password'}))
+        names = [i.get('name') for i in form.find_all('input')
+                 if (i.get('type') or 'text') in ('text', 'password')]
+        self.assertIn('fxfield-0', names)
+        self.assertIn('fxfield-1', names)
+
+    def test_typed_values_reach_js_handler(self):
+        result = self.harness.submit_form(
+            'js-submit-form.html',
+            {'fxfield-0': 'alice', 'fxfield-1': 'secret', 'fxsubmit': 'Log in'},
+            'fxfield-1')
+        # The JS click handler ran with the values we typed (proves both the
+        # positional field fill and the click-the-JS-button-by-label path)
+        self.assertIn('LOGGED-IN user=alice passlen=6', result)
+
+
 class TestButtonLogin(FixtureTest):
     """Pattern: big-social-site login page — <button> submit, noscript
     meta-refresh fallback, decorative aria-hidden chrome."""

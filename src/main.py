@@ -50,6 +50,22 @@ def main():
 
     args = parser.parse_args()
 
+    # Fail fast with an actionable message if a required Python dependency is
+    # missing. bs4 is imported lazily deep in the content/form pipeline, so
+    # without this check a missing install only surfaces mid-session as a
+    # cryptic "Content extraction failed: No module named 'bs4'".
+    try:
+        import bs4  # noqa: F401
+    except ImportError:
+        sys.stderr.write(
+            "Error: Firelynx requires the 'beautifulsoup4' Python package, which is "
+            "not installed.\n"
+            "Install it with one of:\n"
+            "  sudo dnf install python3-beautifulsoup4     # Fedora\n"
+            "  sudo apt install python3-bs4                # Debian/Ubuntu\n"
+            "  pip install beautifulsoup4                  # any (e.g. inside your venv)\n")
+        sys.exit(1)
+
     # Set default port based on mode if not explicitly specified
     # Port choice distinction:
     # - 8080: Standard HTTP proxy port - signals "general purpose proxy server"

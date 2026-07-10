@@ -13,6 +13,24 @@ from .utils.javascript_loader import load_js_file
 logger = logging.getLogger(__name__)
 
 
+# Input types that do NOT accept a typed value (so they aren't given synthetic
+# names or counted when filling form fields positionally).
+_NON_FILLABLE_INPUT_TYPES = {
+    'hidden', 'submit', 'button', 'checkbox', 'radio', 'image', 'reset', 'file'
+}
+
+
+def _is_fillable_field(tag):
+    """True for a form field that accepts a typed value (text/password/etc.,
+    textarea, select) — used to name unnamed fields and to match them
+    positionally at submit time."""
+    if tag.name in ('textarea', 'select'):
+        return True
+    if tag.name == 'input':
+        return (tag.get('type') or 'text').lower() not in _NON_FILLABLE_INPUT_TYPES
+    return False
+
+
 def apply_assistive_semantics(page_data):
     """Post-process extracted HTML with the page's assistive-technology semantics.
 
@@ -489,25 +507,53 @@ class ContentProcessor:
         try:
             soup = BeautifulSoup(html_content, 'html.parser')
 
+            # Give unnamed form fields synthetic names so lynx will serialize
+            # and POST the values the user types. JS-app forms (Vue/React) bind
+            # inputs with no `name` attribute, so lynx would otherwise send
+            # nothing. The name encodes the field's position among fillable
+            # fields; submit_form fills the matching field positionally.
+            for form in soup.find_all('form'):
+                idx = 0
+                for field in form.find_all(['input', 'textarea', 'select']):
+                    if not _is_fillable_field(field):
+                        continue
+                    if not field.get('name'):
+                        field['name'] = f'fxfield-{idx}'
+                    idx += 1
+
             # Find all button elements that don't have href attributes (non-functional in lynx)
             buttons = soup.find_all('button')
 
             for button in buttons:
                 button_text = button.get_text(strip=True)
+                in_form = button.find_parent('form') is not None
 
-                # Submit-capable buttons inside forms must stay submittable:
-                # convert to <input type="submit"> which lynx understands.
-                # (A <button> defaults to type="submit".) The label becomes
-                # the input's value; the real submission is performed by
-                # Firefox clicking the page's actual button, so the exact
-                # submitted value of this control does not matter.
+                # A <button> defaults to type="submit". Submit-capable buttons
+                # inside forms must stay submittable: convert to <input
+                # type="submit"> which lynx understands. The label becomes the
+                # value; the real submission is Firefox clicking the page's own
+                # button, so the exact submitted value does not matter.
                 button_type = (button.get('type') or 'submit').lower()
-                if button_type == 'submit' and button.find_parent('form'):
+                if button_type == 'submit' and in_form:
                     replacement = soup.new_tag('input')
                     replacement['type'] = 'submit'
                     replacement['value'] = button_text or 'Submit'
                     if button.get('name'):
                         replacement['name'] = button['name']
+                    button.replace_with(replacement)
+                    continue
+
+                # A JS-driven button (type="button") inside a form is how
+                # single-page apps submit (a click handler, no native submit).
+                # Surface it as a real submit whose name carries the label, so
+                # lynx sends the field values and submit_form knows which button
+                # to click in Firefox. Label-less ones (icon toggles) fall
+                # through to be dropped below.
+                if button_type == 'button' and in_form and button_text:
+                    replacement = soup.new_tag('input')
+                    replacement['type'] = 'submit'
+                    replacement['name'] = 'fxsubmit'
+                    replacement['value'] = button_text
                     button.replace_with(replacement)
                     continue
 

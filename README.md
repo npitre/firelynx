@@ -87,14 +87,15 @@ ProxySSL, forms, and MFA) see [docs/how-it-works.md](docs/how-it-works.md).
 ## Installation
 
 **Requirements:** a Linux system with Python **3.8 or newer** (3.9+ recommended,
-since Selenium 4.x sets the floor), Firefox, and lynx. `./install.sh` also builds
+since Selenium 4.x sets the floor), the Python packages **Selenium** and
+**BeautifulSoup 4** (`bs4`), plus Firefox and lynx. `./install.sh` also builds
 the bundled ProxySSL library (needed for HTTPS), so a C compiler and the OpenSSL
 headers are required.
 
 ### Fedora Linux
 ```bash
 # Install the packages (gcc/make/openssl-devel are needed to build ProxySSL)
-sudo dnf install python3-selenium selenium-manager firefox lynx gcc make openssl-devel
+sudo dnf install python3-selenium python3-beautifulsoup4 selenium-manager firefox lynx gcc make openssl-devel
 
 # Get and install Firelynx
 git clone https://github.com/npitre/firelynx.git
@@ -118,10 +119,11 @@ venv active, so `python3` is the one that has Selenium.
 sudo apt update
 sudo apt install firefox-esr lynx gcc make libssl-dev python3-venv git
 
-# Selenium from pip in a venv (its bundled manager downloads geckodriver for you)
+# Selenium + BeautifulSoup from pip in a venv (Selenium's bundled manager
+# downloads geckodriver for you)
 python3 -m venv ~/.venvs/firelynx
 source ~/.venvs/firelynx/bin/activate
-pip install selenium
+pip install selenium beautifulsoup4
 
 # Get and install Firelynx (venv still active)
 git clone https://github.com/npitre/firelynx.git

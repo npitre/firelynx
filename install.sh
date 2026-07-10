@@ -59,6 +59,16 @@ if ! python3 -c "import selenium" >/dev/null 2>&1; then
     missing_deps+=("python3-selenium")
 fi
 
+# Check for BeautifulSoup (bs4) — required for form and content processing.
+# Package name differs by distro (like openssl-devel above).
+if ! python3 -c "import bs4" >/dev/null 2>&1; then
+    if [[ -f /etc/debian_version ]]; then
+        missing_deps+=("python3-bs4")
+    else
+        missing_deps+=("python3-beautifulsoup4")
+    fi
+fi
+
 # Check for selenium-manager (built into modern Selenium)
 selenium_manager_available=false
 selenium_manager_type=""

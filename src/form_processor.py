@@ -16,7 +16,18 @@ import logging
 from selenium.webdriver.common.by import By
 from urllib.parse import parse_qs, urlencode, quote, urljoin
 
+from .utils.javascript_loader import load_js_file
+
 logger = logging.getLogger(__name__)
+
+# Form fields that accept a typed value, in document order — used to place
+# values from synthetic fxfield-N names (JS-app forms have no field names).
+# Mirrors content_processor._is_fillable_field.
+FILLABLE_FIELD_SELECTOR = (
+    "input:not([type='hidden']):not([type='submit']):not([type='button'])"
+    ":not([type='checkbox']):not([type='radio']):not([type='image'])"
+    ":not([type='reset']):not([type='file']), textarea, select"
+)
 
 # Field-name substrings that mark a value as sensitive and unsafe to log.
 SENSITIVE_FIELD_PATTERNS = [
@@ -287,6 +298,10 @@ class FormProcessor:
                 self.firefox_backend.login_submitted_at = time.time()
                 logger.debug("🔐 Login-shaped submission recorded (password field present)")
 
+            # The clicked JS-submit button's label travels as fxsubmit (see
+            # content_processor); it selects which button to click, not a field.
+            fx_submit_label = form_data.pop('fxsubmit', [None])[0]
+
             # Try to find and fill the form
             form_filled = False
 
@@ -295,30 +310,66 @@ class FormProcessor:
 
             for form in forms:
                 try:
+                    # The live page's fillable fields, in document order — used
+                    # to place values from synthetic fxfield-N names (JS-app
+                    # forms have no field names of their own).
+                    fillable = form.find_elements(By.CSS_SELECTOR, FILLABLE_FIELD_SELECTOR)
+
                     # Fill in the form fields
                     for field_name, values in form_data.items():
-                        if values:
-                            value = values[0]  # Take the first value
+                        if not values:
+                            continue
+                        value = values[0]  # Take the first value
+                        safe_value = self.filter_field_value(field_name, value)
 
-                            # Try to find input field by name
+                        # Synthetic positional field (unnamed JS-app input)
+                        if field_name.startswith('fxfield-'):
                             try:
-                                input_field = form.find_element(By.NAME, field_name)
-                                input_field.clear()
-                                input_field.send_keys(value)
-                                safe_value = self.filter_field_value(field_name, value)
-                                logger.debug(f"Filled field {field_name} with: {safe_value}")
-                            except Exception:
-                                # Try by id
-                                try:
-                                    input_field = form.find_element(By.ID, field_name)
-                                    input_field.clear()
-                                    input_field.send_keys(value)
-                                    safe_value = self.filter_field_value(field_name, value)
-                                    logger.debug(f"Filled field {field_name} (by ID) with: {safe_value}")
-                                except Exception:
-                                    logger.warning(f"Could not find field: {field_name}")
+                                pos = int(field_name.split('-', 1)[1])
+                            except ValueError:
+                                continue
+                            if 0 <= pos < len(fillable):
+                                fillable[pos].clear()
+                                fillable[pos].send_keys(value)
+                                logger.debug(f"Filled field #{pos} with: {safe_value}")
+                            continue
 
-                    # Submit the form
+                        # Named field: find by name, then id. Never refill a
+                        # hidden field (e.g. a CSRF token the reloaded page set
+                        # itself) with the stale posted value.
+                        try:
+                            input_field = form.find_element(By.NAME, field_name)
+                        except Exception:
+                            try:
+                                input_field = form.find_element(By.ID, field_name)
+                            except Exception:
+                                logger.warning(f"Could not find field: {field_name}")
+                                continue
+                        if (input_field.get_attribute('type') or '').lower() == 'hidden':
+                            continue
+                        input_field.clear()
+                        input_field.send_keys(value)
+                        logger.debug(f"Filled field {field_name} with: {safe_value}")
+
+                    # Submit. If the user activated a JS-driven button, click
+                    # THAT button in Firefox by its label (re-using the modal
+                    # click resolver), which fires the page's own handler.
+                    if fx_submit_label:
+                        try:
+                            modal_js = load_js_file('modal-detection.js')
+                            result = self.driver.execute_script(
+                                modal_js + "\nreturn clickPageControl('', arguments[0]);",
+                                fx_submit_label)
+                            if result and result.get('success'):
+                                logger.info(f"Clicked JS submit button: {fx_submit_label!r}")
+                                form_filled = True
+                                break
+                            logger.warning(f"JS submit button {fx_submit_label!r} not "
+                                           f"found, trying generic submit")
+                        except Exception as e:
+                            logger.warning(f"JS submit click failed: {e}")
+
+                    # Otherwise (or as fallback): click a native submit control
                     try:
                         submit_button = form.find_element(By.CSS_SELECTOR, 'input[type="submit"], button[type="submit"], button:not([type])')
                         logger.info("Clicking submit button...")
