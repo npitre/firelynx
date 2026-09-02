@@ -7,8 +7,8 @@
  * helpers let the proxy scroll incrementally and harvest posts as they pass
  * through the DOM, accumulating them on the Python side with de-duplication.
  *
- * Posts are identified generically as top-level [role="article"] — the standard
- * infinite-scroll signal — never per-site selectors.
+ * Posts are identified generically as top-level [role="article"] - the standard
+ * infinite-scroll signal - never per-site selectors.
  */
 
 // djb2 hash → stable de-dup key for a post (its text doesn't change as the DOM
@@ -23,7 +23,7 @@ function fxHash(s) {
 }
 
 // A [role="article"] that is itself nested inside another article is a comment/
-// embed, not a feed post — only harvest top-level ones.
+// embed, not a feed post - only harvest top-level ones.
 function fxIsTopLevelArticle(a) {
     return !(a.parentElement && a.parentElement.closest('[role="article"]'));
 }

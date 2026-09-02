@@ -161,7 +161,7 @@ class Harness:
 
         Fetches the fixture, reads the password form's rewritten action (the
         proxy's plain-HTTP /form-submit?target=... endpoint), and POSTs the
-        credentials there — exactly what lynx submits. Returns the final HTML
+        credentials there - exactly what lynx submits. Returns the final HTML
         after following the proxy's redirect/poll dance.
         """
         from bs4 import BeautifulSoup

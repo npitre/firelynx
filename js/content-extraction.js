@@ -18,7 +18,7 @@ function extractContentHybrid() {
     // Why: Proven in production, handles complex layouts, link density analysis
     try {
         const documentClone = document.cloneNode(true);
-        // Remove dialog markup from the clone — its content lives in the
+        // Remove dialog markup from the clone - its content lives in the
         // converted dialog interface, not the article
         documentClone.querySelectorAll(
             'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]'
@@ -49,7 +49,7 @@ function extractContentHybrid() {
     
     // Strategy 2: Landmark composition (medium-high confidence)
     // Why: Landmarks are the page's own structure declaration for screen
-    // readers — main first, navigation collapsed, chrome omitted
+    // readers - main first, navigation collapsed, chrome omitted
     const landmarkResult = extractViaLandmarks(inModalContainer);
     if (landmarkResult) {
         strategies.push(landmarkResult);
@@ -173,7 +173,7 @@ function landmarkName(element) {
  * page's purpose first, chrome never).
  *
  * Rationale: landmarks are the structure the page itself maintains for
- * assistive technology — the signal redesigns are not allowed to break.
+ * assistive technology - the signal redesigns are not allowed to break.
  */
 function extractViaLandmarks(inModalContainer) {
     const main = document.querySelector('main, [role="main"]');
@@ -514,7 +514,7 @@ function createFallbackResult() {
  */
 function executeContentExtraction() {
     // Capture JS-driven controls (role=button) as structured data in this
-    // synchronous pass — reliable even on apps that re-render moments later.
+    // synchronous pass - reliable even on apps that re-render moments later.
     // The proxy renders them as activatable links; see modal-detection.js.
     let pageControls = [];
     try {

@@ -14,13 +14,14 @@ import re
 import html
 import logging
 from selenium.webdriver.common.by import By
+from selenium.common.exceptions import TimeoutException
 from urllib.parse import parse_qs, urlencode, quote, urljoin
 
 from .utils.javascript_loader import load_js_file
 
 logger = logging.getLogger(__name__)
 
-# Form fields that accept a typed value, in document order — used to place
+# Form fields that accept a typed value, in document order - used to place
 # values from synthetic fxfield-N names (JS-app forms have no field names).
 # Mirrors content_processor._is_fillable_field.
 FILLABLE_FIELD_SELECTOR = (
@@ -93,7 +94,7 @@ class FormProcessor:
             // ways a control is hidden: display/visibility/opacity, zero size,
             // aria-hidden/hidden, and offscreen positioning. Facebook keeps a
             // HIDDEN input[autocomplete="one-time-code"] (WebOTP autofill) on
-            // logged-in pages — it must not count as a credential challenge.
+            // logged-in pages - it must not count as a credential challenge.
             function fxVisible(el) {
                 if (!el) return false;
                 if (el.closest('[aria-hidden="true"], [hidden]')) return false;
@@ -112,7 +113,7 @@ class FormProcessor:
             // 0. Authenticated-session override (language-agnostic).
             // If the page shows app chrome you only get AFTER signing in
             // (messages/notifications/friends/logout links) AND has no
-            // credential-entry field, it is not an auth challenge — regardless
+            // credential-entry field, it is not an auth challenge - regardless
             // of any stray "code"-named input or security text elsewhere on
             // the page. This replaces the old English-only success-text check
             // ("what is on your mind"), which never matched localized UIs and
@@ -120,7 +121,7 @@ class FormProcessor:
             // login was just submitted, so the push-pending flow still runs.
             const hasAuthChrome = !!document.querySelector(
                 'a[href*="logout"], a[href*="/messages/"], a[href*="/notifications"], a[href*="/friends/"]');
-            // A REAL, VISIBLE credential field — not any input whose name
+            // A REAL, VISIBLE credential field - not any input whose name
             // happens to contain "code" (promo/country/CSRF), and not a hidden
             // autofill helper, both of which tripped the false positive
             const hasCredentialField = Array.from(document.querySelectorAll(
@@ -132,7 +133,7 @@ class FormProcessor:
                 return mfaAnalysis;  // stays hasMfaFields=false → not an MFA challenge
             }
 
-            // 1. Check for MFA-specific form fields. Specific OTP patterns only —
+            // 1. Check for MFA-specific form fields. Specific OTP patterns only -
             // a bare name*="code" also matches promo/country/CSRF fields and was
             // a source of false positives.
             const mfaFieldSelectors = [
@@ -145,7 +146,7 @@ class FormProcessor:
             ];
 
             for (const selector of mfaFieldSelectors) {
-                // Only a VISIBLE code field is an actual challenge — a hidden
+                // Only a VISIBLE code field is an actual challenge - a hidden
                 // autofill/WebOTP input does not count
                 const visibleField = Array.from(document.querySelectorAll(selector)).find(fxVisible);
                 if (visibleField) {
@@ -283,9 +284,16 @@ class FormProcessor:
             safe_post_data = self.filter_sensitive_data(post_data_str)
             logger.debug(f"POST data: {safe_post_data}")
 
-            # Navigate to the URL first
+            # Navigate to the URL first. Heavy JS login pages (Microsoft, Google)
+            # may never fire a full 'load' within the page-load timeout; proceed
+            # with whatever rendered rather than aborting the whole submission.
             time.sleep(random.uniform(0.3, 0.8))
-            self.driver.get(url)
+            try:
+                self.driver.get(url)
+            except TimeoutException:
+                logger.warning(f"Page load timed out for {url}; continuing with the partial page")
+            # Let the page settle (DOM quiescence) so the form is present to fill.
+            self.firefox_backend.wait_for_page_settle()
             self.firefox_backend.hide_webdriver_traces()
 
             # Parse form data
@@ -310,7 +318,7 @@ class FormProcessor:
 
             for form in forms:
                 try:
-                    # The live page's fillable fields, in document order — used
+                    # The live page's fillable fields, in document order - used
                     # to place values from synthetic fxfield-N names (JS-app
                     # forms have no field names of their own).
                     fillable = form.find_elements(By.CSS_SELECTOR, FILLABLE_FIELD_SELECTOR)
@@ -473,7 +481,7 @@ class FormProcessor:
 
             # One form, one section per dialog: its name (when the page labels
             # it), its text, then its buttons. This is THE place a detected
-            # dialog is presented — extraction excludes dialog content from
+            # dialog is presented - extraction excludes dialog content from
             # the page body so nothing appears twice.
             modal_html = (
                 '<div style="border: 2px solid blue; padding: 15px; margin: 10px; background: #f0f8ff;">\n'
@@ -545,7 +553,7 @@ class FormProcessor:
         A detected dialog is presented once, by the converted interface that
         convert_modal_elements_to_forms() injects. Copies of the dialog's
         markup can still sit inside content sections whose source element
-        contained the dialog (e.g. a main landmark wrapping it) — and lynx
+        contained the dialog (e.g. a main landmark wrapping it) - and lynx
         ignores CSS, so even display:none dialog markup would render as
         visible text. Strip it all.
         """

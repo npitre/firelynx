@@ -1,5 +1,5 @@
 /**
- * Modal Dialog Detection System — accessibility-first
+ * Modal Dialog Detection System - accessibility-first
  *
  * IMPORTANT: This JavaScript runs in Firefox and should NEVER reference the proxy server.
  * It only detects and catalogs modal elements for the proxy to handle.
@@ -15,9 +15,9 @@
  * 1. Top layer:       open native <dialog> elements
  * 2. ARIA:            visible [role="dialog"], [role="alertdialog"], [aria-modal="true"]
  * 3. Background flip: a body-level subtree marked aria-hidden/inert while a
- *                     sibling stays exposed — the exposed sibling hosts the
+ *                     sibling stays exposed - the exposed sibling hosts the
  *                     modal (how major sites signal modality to screen readers)
- * 4. Geometry:        only when 1–3 find nothing — the topmost fixed/sticky
+ * 4. Geometry:        only when 1-3 find nothing - the topmost fixed/sticky
  *                     element at sampled viewport points, accepted when the
  *                     page shows modality (scroll lock or full-page backdrop)
  *                     or the element covers a large viewport fraction.
@@ -32,7 +32,7 @@ const FIRELYNX_BUTTON_SELECTOR = 'button, input[type="submit"], input[type="butt
 
 /**
  * Visibility check for CONTAINERS (dialogs, overlays). Works for
- * position:fixed elements — offsetParent is null for those, so it must not
+ * position:fixed elements - offsetParent is null for those, so it must not
  * be used here. Opacity counts: a faded-out dialog is not currently shown.
  */
 function isElementVisible(element) {
@@ -59,8 +59,8 @@ function isAssistiveHidden(element) {
  * Operability check for CONTROLS (buttons, inputs). Deliberately ignores
  * opacity: a very common styling pattern (Amazon's UI toolkit among many)
  * hides the real control at near-zero opacity under a styled wrapper that
- * carries the visible label. The accessibility tree exposes such controls —
- * only display:none / visibility:hidden prune them — so we must too.
+ * carries the visible label. The accessibility tree exposes such controls -
+ * only display:none / visibility:hidden prune them - so we must too.
  */
 function isElementOperable(element) {
     if (!element || !element.getClientRects || element.getClientRects().length === 0) {
@@ -104,7 +104,7 @@ function accessibleName(element) {
 }
 
 /**
- * Explicit label only (aria-label / aria-labelledby) — no text fallback.
+ * Explicit label only (aria-label / aria-labelledby) - no text fallback.
  * Used for naming dialogs, where innerText is the content, not the name.
  */
 function explicitLabel(element) {
@@ -122,8 +122,8 @@ function explicitLabel(element) {
 }
 
 /**
- * Label for a CONTROL: its accessible name, or — when the control itself is
- * nameless — the text of the nearest wrapper that contains exactly this one
+ * Label for a CONTROL: its accessible name, or - when the control itself is
+ * nameless - the text of the nearest wrapper that contains exactly this one
  * control. Handles the styled-control pattern where the visible label is a
  * sibling span inside the button wrapper rather than part of the control.
  */
@@ -135,7 +135,7 @@ function buttonLabel(control) {
     for (let depth = 0; wrapper && wrapper !== document.body && depth < 3; depth++) {
         const controls = wrapper.querySelectorAll(FIRELYNX_BUTTON_SELECTOR);
         if (controls.length > 1) {
-            break; // wrapper spans multiple controls — its text is ambiguous
+            break; // wrapper spans multiple controls - its text is ambiguous
         }
         const text = (wrapper.innerText || '').trim();
         if (text) return text;
@@ -146,7 +146,7 @@ function buttonLabel(control) {
 
 /**
  * Find the containers that currently behave as modal dialogs.
- * Pure query — does not tag anything. Shared by detection and click
+ * Pure query - does not tag anything. Shared by detection and click
  * re-resolution so both see the same containers.
  */
 function findModalContainers() {
@@ -206,7 +206,7 @@ function findModalContainers() {
 /**
  * Geometry-based overlay detection for ARIA-less modals (cookie banners).
  *
- * A modal, by definition, visually covers the page — so instead of scanning
+ * A modal, by definition, visually covers the page - so instead of scanning
  * every element's computed style, sample a 3x3 grid of viewport points and
  * take the topmost fixed/sticky element of each hit stack. A sampled element
  * qualifies when the page shows modality (scroll lock on body/html, or a
@@ -299,7 +299,7 @@ function detectModalElements() {
             elementId: dialogId,
             name: explicitLabel(dialog).slice(0, 80),
             // The dialog's prose, shown alongside its buttons in the proxy's
-            // converted interface — the ONE place dialog content is rendered
+            // converted interface - the ONE place dialog content is rendered
             text: (dialog.innerText || '').trim().slice(0, 600),
             buttonCount: visibleButtons.length,
             visible: true
@@ -334,7 +334,7 @@ function detectModalElements() {
  * Called by the Python proxy when the user submits a converted modal form.
  *
  * Strategy 1: the element tagged at detection time, if it still exists.
- * Strategy 2: re-resolve by accessible name — first inside the containers
+ * Strategy 2: re-resolve by accessible name - first inside the containers
  *             that are modal RIGHT NOW, then anywhere on the page. This is
  *             what makes clicks survive framework re-renders: the user chose
  *             a label, not a DOM node.
@@ -382,7 +382,7 @@ function clickModalElement(elementId, actionType, label) {
 /**
  * Tag in-content JS-driven controls so the proxy can make them activatable
  * in lynx. Facebook (and React apps generally) build actionable controls as
- * <div role="button"> / <button> with JavaScript click handlers and no href —
+ * <div role="button"> / <button> with JavaScript click handlers and no href -
  * lynx cannot activate them. We tag each live control with data-fx-click="<id>"
  * (so it survives into the extracted innerHTML snapshot) and data-fx-main="1"
  * when it sits inside the main content landmark. The Python side decides which
@@ -393,7 +393,7 @@ function clickModalElement(elementId, actionType, label) {
  * by the converted dialog interface), and controls with no accessible name.
  *
  * Returns a structured list [{id, name, main}] captured in this synchronous
- * pass — reliable even on apps that re-render and wipe attributes moments
+ * pass - reliable even on apps that re-render and wipe attributes moments
  * later (the feed does this). The proxy renders the list; clicking re-resolves
  * by id (fast path) or accessible name (after re-render). Each control is also
  * tagged data-fx-click="<id>" for the fast click path.
@@ -433,7 +433,7 @@ function tagActivatablePageControls() {
 /**
  * Click a page control previously tagged by tagActivatablePageControls().
  * Tag first (fast path); if the framework re-rendered it away, re-resolve by
- * accessible name among current controls — same resilience as modal clicks.
+ * accessible name among current controls - same resilience as modal clicks.
  */
 function clickPageControl(controlId, name) {
     try {

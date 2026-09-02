@@ -3,7 +3,7 @@
  *
  * Runs at document_start directly in the page's JavaScript context (not an
  * isolated sandbox), so modifications to navigator are immediately visible to
- * all page scripts — including bot detection that fires on initial page load.
+ * all page scripts - including bot detection that fires on initial page load.
  */
 
 // Hide WebDriver flag
@@ -16,7 +16,7 @@ try {
 
 // Fix headless-mode window dimensions.
 // In Firefox headless, outerWidth/outerHeight are 0 until set by the browser
-// chrome — a strong fingerprinting signal that reliably identifies headless runs.
+// chrome - a strong fingerprinting signal that reliably identifies headless runs.
 try {
     if (window.outerWidth === 0) {
         Object.defineProperty(window, 'outerWidth', {

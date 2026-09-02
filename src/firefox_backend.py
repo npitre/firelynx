@@ -119,7 +119,7 @@ class FirefoxBackend:
                     # Use specific named profile
                     profile_path = os.path.join(profiles_dir, self.profile_name)
                     # geckodriver fails with "Failed to set preferences" if the
-                    # profile directory doesn't exist yet — create it first.
+                    # profile directory doesn't exist yet - create it first.
                     os.makedirs(profile_path, exist_ok=True)
                     self._remove_stale_profile_lock(profile_path)
                     self._clear_profile_pref(profile_path, 'general.useragent.override')
@@ -131,7 +131,7 @@ class FirefoxBackend:
                     # Use persistent firelynx profile
                     firelynx_profile_path = os.path.join(profiles_dir, 'firelynx-profile')
                     # geckodriver fails with "Failed to set preferences" if the
-                    # profile directory doesn't exist yet (e.g. the first run) —
+                    # profile directory doesn't exist yet (e.g. the first run) -
                     # create it first.
                     os.makedirs(firelynx_profile_path, exist_ok=True)
                     self._remove_stale_profile_lock(firelynx_profile_path)
@@ -160,6 +160,12 @@ class FirefoxBackend:
         options.set_preference("dom.webdriver.enabled", False)
         options.set_preference("useAutomationExtension", False)
         options.set_preference("intl.accept_languages", "en-US, en;q=0.9")
+
+        # Return from navigation at DOMContentLoaded instead of the full 'load'
+        # event. Heavy JS-app pages (big-provider logins) keep loading resources
+        # and may never fire 'load' within the timeout; the settle loop
+        # (wait_for_page_settle) then waits for the DOM to actually go quiet.
+        options.page_load_strategy = 'eager'
 
         try:
             # Reuse a geckodriver that selenium-manager already cached (faster
@@ -215,7 +221,7 @@ class FirefoxBackend:
         """Wait until the page has stopped changing, then return.
 
         This is THE sampling rule: every content snapshot (initial load, after
-        a modal click, after a form submission) waits for the same condition —
+        a modal click, after a form submission) waits for the same condition -
         document.readyState complete, then no DOM mutations for `quiet_ms`
         milliseconds (capped at `max_wait` seconds total).
 
@@ -238,7 +244,7 @@ class FirefoxBackend:
 
         # Idempotent: first call after a navigation installs the observer and
         # reports 0ms quiet; later calls just report time since last mutation.
-        # Always returns a finite number — during an in-flight navigation the
+        # Always returns a finite number - during an in-flight navigation the
         # subtraction could be NaN (which Selenium maps to Python None), so we
         # coerce to 0 ("just changed, not settled") here.
         settle_js = """
@@ -520,7 +526,7 @@ class FirefoxBackend:
         pagination.
         """
         url = self.driver.current_url
-        # A fresh page load re-harvests from the top — the feed content is
+        # A fresh page load re-harvests from the top - the feed content is
         # current, and stale accumulation from a previous visit shouldn't show.
         # Accumulation across "Load more" happens in handle_load_more, which
         # extends the live scrolled feed WITHOUT reloading.
@@ -604,12 +610,12 @@ class FirefoxBackend:
         try:
             # Infinite-scroll feeds get scroll-harvest pagination instead of a
             # single snapshot (which would show only the handful of posts the
-            # virtualized DOM holds). Checked first — a logged-in feed otherwise
+            # virtualized DOM holds). Checked first - a logged-in feed otherwise
             # falls through to the form-page or hybrid path.
             feed = self.is_feed_page()
             if feed.get('isFeed'):
                 logger.info(f"📜 Feed detected ({feed.get('articleCount')} articles) "
-                            f"— using scroll-harvest pagination")
+                            f"- using scroll-harvest pagination")
                 return self.extract_feed_page()
 
             # Next, try Python-side DOM processing for form pages
@@ -620,7 +626,7 @@ class FirefoxBackend:
                     logger.info("✅ Using Python-side DOM extraction for form page")
                     # Form pages get the same dialog detection, page-control
                     # capture, and shared enrichment (SSL info, assistive
-                    # semantics, modal conversion) as every other page — login
+                    # semantics, modal conversion) as every other page - login
                     # pages and app shells (the logged-in feed classifies as a
                     # form page) are exactly where dialogs and JS controls live
                     try:
@@ -710,7 +716,7 @@ class FirefoxBackend:
 
         Thin delegate to FormProcessor (which owns form filling/submission).
         The proxy handler holds a FirefoxBackend reference and submits through
-        it, so this delegate must exist — without it every form POST (login,
+        it, so this delegate must exist - without it every form POST (login,
         search) raises AttributeError in the background submit thread.
         """
         return FormProcessor(self).submit_form(url, post_data, headers)
@@ -859,7 +865,7 @@ class FirefoxBackend:
         logger.debug(f"🔧 Python-side DOM processing: {form_data['formCount']} forms, {form_data['inputCount']} inputs")
 
         # Check if this should be treated as a form-centric page.
-        # Use visible text length (innerText) rather than HTML source size — search pages
+        # Use visible text length (innerText) rather than HTML source size - search pages
         # like Google have huge HTML but almost no visible text, while a news site with a
         # search box in the header has thousands of visible characters of article content.
         #

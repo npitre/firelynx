@@ -9,7 +9,7 @@ Run from the repo root:
 
 Each fixture in tests/fixtures/ encodes one GENERIC web pattern (never a
 specific site) and is loaded through a real headless Firefox + the real
-proxy pipeline — assertions target the HTML/text lynx would actually show.
+proxy pipeline - assertions target the HTML/text lynx would actually show.
 
 Tests marked @unittest.expectedFailure document behavior that is known to be
 broken; the comment names the capability expected to fix it. Removing the
@@ -59,7 +59,7 @@ class TestArticleExtraction(FixtureTest):
 
 
 class TestFormPages(FixtureTest):
-    """Pattern: form-centric page (login) — fields must survive extraction."""
+    """Pattern: form-centric page (login) - fields must survive extraction."""
 
     @classmethod
     def setUpClass(cls):
@@ -90,7 +90,7 @@ class TestFormPages(FixtureTest):
 
 
 class TestFormSubmission(FixtureTest):
-    """The form-submission pipeline (login/polling path) must actually work —
+    """The form-submission pipeline (login/polling path) must actually work -
     it regressed when submit_form moved to FormProcessor without a delegate."""
 
     def test_backend_has_submit_form(self):
@@ -101,7 +101,7 @@ class TestFormSubmission(FixtureTest):
     def test_login_submission_round_trips(self):
         result = self.harness.submit_login('submit-echo.html',
                                            user='alice', password='secret')
-        # The submission reached the target and came back rendered — not the
+        # The submission reached the target and came back rendered - not the
         # "Firefox Proxy Error / https://" failure chain
         self.assertIn('ECHO-MARKER user=alice', result)
         self.assertNotIn('Firefox Proxy Error', result)
@@ -127,7 +127,7 @@ class TestSubmitTimeValidation(FixtureTest):
 
 
 class TestJsSubmitForm(FixtureTest):
-    """Pattern: single-page-app login (Vue/React) — unnamed fields, no form
+    """Pattern: single-page-app login (Vue/React) - unnamed fields, no form
     action, submit is a <button type=button> JS handler, plus a label-less icon
     toggle. lynx must get a pressable submit, and the typed values must reach
     the JS handler."""
@@ -167,7 +167,7 @@ class TestJsSubmitForm(FixtureTest):
 
 
 class TestButtonLogin(FixtureTest):
-    """Pattern: big-social-site login page — <button> submit, noscript
+    """Pattern: big-social-site login page - <button> submit, noscript
     meta-refresh fallback, decorative aria-hidden chrome."""
 
     @classmethod
@@ -229,7 +229,7 @@ class TestRoleButtonLogin(FixtureTest):
 class TestAppShellClassification(FixtureTest):
     """Pattern: app shell with a search form + substantial main landmark and
     low total text. Must NOT be raw-dumped as a form page (which buries the
-    feed under chrome) — landmark extraction keeps main and omits chrome."""
+    feed under chrome) - landmark extraction keeps main and omits chrome."""
 
     @classmethod
     def setUpClass(cls):
@@ -246,7 +246,7 @@ class TestAppShellClassification(FixtureTest):
 
 
 class TestLandmarkComposition(FixtureTest):
-    """Pattern: landmarked page (banner/nav/main/aside/footer) — output should
+    """Pattern: landmarked page (banner/nav/main/aside/footer) - output should
     follow the screen-reader view: main first, navigation collapsed below,
     chrome omitted."""
 
@@ -276,7 +276,7 @@ class TestLandmarkComposition(FixtureTest):
 
 class TestPageControlActivation(FixtureTest):
     """Pattern: JS-driven role=button controls. Activation breadth follows the
-    content filter — minimal=none, balanced=main only, all=everything — and a
+    content filter - minimal=none, balanced=main only, all=everything - and a
     followed control clicks the real element in Firefox."""
 
     def test_minimal_activates_nothing(self):

@@ -664,7 +664,7 @@ class HTTPProxyHandler(BaseHTTPRequestHandler):
 
             # Modal buttons use a single inline form (same pattern as the filter
             # buttons): the clicked submit button's name encodes "action|element_id"
-            # and its value carries the button's "[Label]" — the accessible name
+            # and its value carries the button's "[Label]" - the accessible name
             # used to re-resolve the element if it was re-rendered away.
             action = ''
             element_id = ''
@@ -952,7 +952,7 @@ class HTTPProxyHandler(BaseHTTPRequestHandler):
             backend = self.server.firefox_backend
             state = backend.feed_state.get(url)
             if state is None:
-                # No accumulated state (e.g. Firefox navigated away) — just
+                # No accumulated state (e.g. Firefox navigated away) - just
                 # reload the page fresh through the normal path
                 logger.info("Load more: no feed state, falling back to fetch")
                 self.send_lynx_response(backend.fetch_page(url))

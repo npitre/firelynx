@@ -1,5 +1,5 @@
 # Python dependencies for Firelynx (for pip/venv installs).
 # On Fedora these are available as distro packages instead
-# (python3-selenium, python3-beautifulsoup4) — see the README.
+# (python3-selenium, python3-beautifulsoup4) - see the README.
 selenium>=4
 beautifulsoup4

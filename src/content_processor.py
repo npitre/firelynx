@@ -22,7 +22,7 @@ _NON_FILLABLE_INPUT_TYPES = {
 
 def _is_fillable_field(tag):
     """True for a form field that accepts a typed value (text/password/etc.,
-    textarea, select) — used to name unnamed fields and to match them
+    textarea, select) - used to name unnamed fields and to match them
     positionally at submit time."""
     if tag.name in ('textarea', 'select'):
         return True
@@ -39,7 +39,7 @@ def apply_assistive_semantics(page_data):
     icons, app shells inside a kept section). This pass applies the same
     screen-reader contract to the final HTML lynx will see:
 
-    1. Remove subtrees marked aria-hidden="true" or inert — the page itself
+    1. Remove subtrees marked aria-hidden="true" or inert - the page itself
        declares them irrelevant to assistive technology. Guarded: if removal
        would leave almost nothing (broken markup hiding everything), keep the
        original so the user never gets a blank page.
@@ -87,7 +87,7 @@ def apply_assistive_semantics(page_data):
             logger.debug(f"♿ Labelled {labelled} text-less links from aria-label")
 
         # Firefox executed the page's JavaScript, so <noscript> fallbacks are
-        # wrong here — and lynx renders them (often a meta-refresh redirect to
+        # wrong here - and lynx renders them (often a meta-refresh redirect to
         # a degraded no-JS variant, e.g. Facebook's _fb_noscript)
         noscript_junk = soup.find_all('noscript') + soup.find_all(
             'meta', attrs={'http-equiv': re.compile(r'^refresh$', re.IGNORECASE)})
@@ -435,7 +435,7 @@ class ContentProcessor:
         """Render JS-driven controls (role=button) the extractor captured as an
         activatable section for lynx, gated by the content filter:
 
-          - minimal:  nothing (reader mode) — only blocking dialogs surface
+          - minimal:  nothing (reader mode) - only blocking dialogs surface
           - balanced: controls inside the main content landmark
           - all:      every captured control
 
@@ -451,7 +451,7 @@ class ContentProcessor:
         if all_controls:
             main_n = sum(1 for c in all_controls if c.get('main'))
             logger.info(f"⚡ Page controls captured: {len(all_controls)} "
-                        f"({main_n} in main) — {[c.get('name','') for c in all_controls][:20]}")
+                        f"({main_n} in main) - {[c.get('name','') for c in all_controls][:20]}")
 
         if filter_level == 'minimal':
             return ''
@@ -461,7 +461,7 @@ class ContentProcessor:
             main_controls = [c for c in controls if c.get('main')]
             # If the page has a main landmark, show its controls; if NONE are in
             # main (a landmark-less interstitial like the device-trust screen),
-            # "main-only" is meaningless — the controls ARE the page, so show them
+            # "main-only" is meaningless - the controls ARE the page, so show them
             controls = main_controls if main_controls else controls
         if not controls:
             return ''
@@ -538,7 +538,15 @@ class ContentProcessor:
                     replacement = soup.new_tag('input')
                     replacement['type'] = 'submit'
                     replacement['value'] = button_text or 'Submit'
-                    if button.get('name'):
+                    # A labeled submit <button> may be JS-driven (single-page-app
+                    # logins whose native submit does nothing on its own). Carry
+                    # the label as fxsubmit so submit_form clicks the page's own
+                    # button in Firefox, firing its handler; a genuinely native
+                    # submit still works when clicked. Label-less ones keep any
+                    # real name for plain Enter-key submission.
+                    if button_text:
+                        replacement['name'] = 'fxsubmit'
+                    elif button.get('name'):
                         replacement['name'] = button['name']
                     button.replace_with(replacement)
                     continue
@@ -581,7 +589,7 @@ class ContentProcessor:
             # Ensure every form has a LABELED submit control. Modern sites
             # (Facebook among them) pair a hidden unlabeled <input type=submit>
             # (for Enter-key submission) with a styled [role="button"] div that
-            # carries the visible label — dead markup in lynx. Promote that
+            # carries the visible label - dead markup in lynx. Promote that
             # div's accessible name to a real submit input. The actual
             # submission is performed by Firefox clicking the page's own
             # controls, so the substitute's name/value don't matter.
